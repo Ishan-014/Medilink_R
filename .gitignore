@@ -1,0 +1,28 @@
+cat > .gitignore <<'EOF'
+.DS_Store
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+backend/venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node / React
+frontend/node_modules/
+node_modules/
+frontend/dist/
+dist/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+EOF
