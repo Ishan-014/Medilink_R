@@ -27,6 +27,8 @@ import re
 from pwdlib import PasswordHash
 from pypdf import PdfReader
 
+from backend.auth.router import router as auth_router
+
 
 # ==========================================================
 # FASTAPI APPLICATION
@@ -36,6 +38,9 @@ app = FastAPI(
     title="MediLink Backend",
     version="1.0"
 )
+
+# Three-layer staff authentication: credentials → ID card → face.
+app.include_router(auth_router)
 
 
 # ==========================================================
