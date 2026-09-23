@@ -1,5 +1,6 @@
-cat > .gitignore <<'EOF'
+# OS
 .DS_Store
+Thumbs.db
 
 # Secrets
 .env
@@ -7,22 +8,30 @@ cat > .gitignore <<'EOF'
 !.env.example
 
 # Python
-backend/venv/
 venv/
+.venv/
+backend/venv/
 __pycache__/
 *.pyc
 *.pyo
 
 # Node / React
-frontend/node_modules/
 node_modules/
-frontend/dist/
+frontend/node_modules/
 dist/
+frontend/dist/
 
-# Logs
+# Logs / temp
 *.log
-
-# Temporary files
 *.tmp
 *.swp
-EOF
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local biometric reference data — NEVER commit real face images
+backend/data/reference_faces/
+data/reference_faces/
+auth_prototype/data/reference_faces/
