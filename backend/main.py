@@ -21,6 +21,7 @@ from io import BytesIO
 
 import psycopg2
 import jwt
+import os
 import re
 
 from pwdlib import PasswordHash
@@ -65,7 +66,7 @@ password_hash = PasswordHash.recommended()
 # JWT CONFIGURATION
 # ==========================================================
 
-SECRET_KEY = "medilink-demo-secret-key"
+SECRET_KEY = os.environ.get("MEDILINK_JWT_SECRET", "dev-secret-change-me")
 
 ALGORITHM = "HS256"
 
@@ -171,11 +172,17 @@ def get_current_user(
             "user_id":
                 payload["user_id"],
 
+            "employee_id":
+                payload.get("employee_id", payload["user_id"]),
+
             "email":
                 payload["email"],
 
             "role":
-                payload["role"]
+                payload["role"],
+
+            "auth_level":
+                payload.get("auth_level", 1),
 
         }
 
