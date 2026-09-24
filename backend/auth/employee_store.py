@@ -3,7 +3,9 @@
 The 3-layer auth pipeline uses this module as its identity boundary. It reads
 from the same PostgreSQL users table used by the application backend.
 """
+from dotenv import load_dotenv
 
+load_dotenv()
 import os
 from typing import Optional
 

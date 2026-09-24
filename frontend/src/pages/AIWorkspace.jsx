@@ -30,7 +30,7 @@ import {
   
     const patientId =
       searchParams.get("patient") ||
-      "MED00001";
+      "PAT-001";
   
   
     const [patient, setPatient] =

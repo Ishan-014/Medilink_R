@@ -10,12 +10,10 @@ import os
 import uuid
 import jwt
 from datetime import datetime, timedelta, timezone
-from passlib.context import CryptContext
-
+from pwdlib import PasswordHash
 from .models import Employee, StageToken, LoginStage, LoginResult
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
+password_hash = PasswordHash.recommended()
 # In production load this from a secrets manager / env var, never hardcode.
 JWT_SECRET = os.environ.get("MEDILINK_JWT_SECRET", "dev-secret-change-me")
 JWT_ALGORITHM = "HS256"
@@ -26,11 +24,11 @@ STAGE_TOKEN_TTL_MINUTES = 5   # each stage token is short-lived on purpose
 # Password helpers (used at employee-provisioning time too)
 # ---------------------------------------------------------------------------
 def hash_password(plain_password: str) -> str:
-    return pwd_context.hash(plain_password)
+    return password_hash.hash(plain_password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return password_hash.verify(plain_password, hashed_password)
 
 
 # ---------------------------------------------------------------------------

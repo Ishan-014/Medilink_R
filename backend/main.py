@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -28,8 +31,8 @@ from pwdlib import PasswordHash
 from pypdf import PdfReader
 
 from backend.auth.router import router as auth_router
-
-
+from backend.auth.credentials import JWT_SECRET, JWT_ALGORITHM
+from backend.agents.graph import run_agent
 # ==========================================================
 # FASTAPI APPLICATION
 # ==========================================================
@@ -71,7 +74,7 @@ password_hash = PasswordHash.recommended()
 # JWT CONFIGURATION
 # ==========================================================
 
-SECRET_KEY = os.environ.get("MEDILINK_JWT_SECRET", "dev-secret-change-me")
+SECRET_KEY = JWT_SECRET
 
 ALGORITHM = "HS256"
 
@@ -97,10 +100,40 @@ MAX_FILE_SIZE = 5 * 1024 * 1024
 # ==========================================================
 
 def get_db_connection():
-
     return psycopg2.connect(
-        dbname="medilink"
+        dbname=os.getenv("MEDILINK_DB_NAME", "medilink"),
+        host=os.getenv("MEDILINK_DB_HOST", "localhost"),
+        port=os.getenv("MEDILINK_DB_PORT", "5432"),
+        user=os.getenv("MEDILINK_DB_USER", "postgres"),
+        password=os.getenv("MEDILINK_DB_PASSWORD"),
     )
+
+
+def normalize_patient_record(patient):
+    if not patient:
+        return None
+
+    normalized = dict(patient)
+
+    if "patient_id" not in normalized and "id" in normalized:
+        normalized["patient_id"] = normalized["id"]
+    if "id" not in normalized and "patient_id" in normalized:
+        normalized["id"] = normalized["patient_id"]
+
+    if "first_name" not in normalized or "last_name" not in normalized:
+        raw_name = str(normalized.get("name") or normalized.get("first_name") or "").strip()
+        if raw_name:
+            parts = raw_name.split()
+            normalized["first_name"] = parts[0] if parts else ""
+            normalized["last_name"] = " ".join(parts[1:]) if len(parts) > 1 else ""
+        else:
+            normalized["first_name"] = normalized.get("first_name") or ""
+            normalized["last_name"] = normalized.get("last_name") or ""
+
+    if "department" not in normalized:
+        normalized["department"] = normalized.get("department") or "Clinical"
+
+    return normalized
 
 
 # ==========================================================
@@ -158,48 +191,32 @@ def create_access_token(
 # ==========================================================
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials
-    = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-
     token = credentials.credentials
 
     try:
-
         payload = jwt.decode(
             token,
-            SECRET_KEY,
-            algorithms=[ALGORITHM]
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
         )
 
         return {
-
-            "user_id":
-                payload["user_id"],
-
-            "employee_id":
-                payload.get("employee_id", payload["user_id"]),
-
-            "email":
-                payload["email"],
-
-            "role":
-                payload["role"],
-
-            "auth_level":
-                payload.get("auth_level", 1),
-
+            "user_id": payload["user_id"],
+            "employee_id": payload.get("employee_id", payload["user_id"]),
+            "email": payload["email"],
+            "role": payload["role"],
+            "auth_level": payload.get("auth_level", 1),
         }
 
     except jwt.ExpiredSignatureError:
-
         raise HTTPException(
             status_code=401,
             detail="Token expired"
         )
 
     except jwt.InvalidTokenError:
-
         raise HTTPException(
             status_code=401,
             detail="Invalid token"
@@ -390,33 +407,24 @@ def doctor_patients(
     q: Optional[str] = None,
     current_user=Depends(doctor_only)
 ):
-
     conn = get_db_connection()
-
     cursor = conn.cursor()
 
-
     if q:
-
         search = f"%{q}%"
 
         cursor.execute(
             """
             SELECT *
-
-            FROM doctor_patient_view
-
-            WHERE patient_id ILIKE %s
-               OR first_name ILIKE %s
-               OR last_name ILIKE %s
-               OR assigned_doctor ILIKE %s
-               OR department ILIKE %s
-
-            ORDER BY patient_id
-
+            FROM patients
+            WHERE id ILIKE %s
+               OR name ILIKE %s
+               OR phone ILIKE %s
+               OR email ILIKE %s
+               OR blood_group ILIKE %s
+            ORDER BY id
             LIMIT 100
             """,
-
             (
                 search,
                 search,
@@ -427,53 +435,33 @@ def doctor_patients(
         )
 
     else:
-
         cursor.execute(
             """
             SELECT *
-
-            FROM doctor_patient_view
-
-            ORDER BY patient_id
-
+            FROM patients
+            ORDER BY id
             LIMIT 100
             """
         )
-
 
     rows = cursor.fetchall()
 
     columns = [
         description[0]
-        for description
-        in cursor.description
+        for description in cursor.description
     ]
-
 
     patients = [
-
-        dict(
-            zip(
-                columns,
-                row
-            )
-        )
-
+        normalize_patient_record(dict(zip(columns, row)))
         for row in rows
     ]
-
 
     cursor.close()
     conn.close()
 
-
     return {
-
-        "logged_in_as":
-            current_user["role"],
-
-        "patients":
-            patients
+        "logged_in_as": current_user["role"],
+        "patients": patients
     }
 
 
@@ -547,17 +535,9 @@ def receptionist_patients(
 
 
     patients = [
-
-        dict(
-            zip(
-                columns,
-                row
-            )
-        )
-
+        normalize_patient_record(dict(zip(columns, row)))
         for row in rows
     ]
-
 
     cursor.close()
     conn.close()
@@ -593,48 +573,32 @@ def doctor_patient_detail(
     cursor.execute(
         """
         SELECT *
-
-        FROM doctor_patient_view
-
-        WHERE patient_id = %s
+        FROM patients
+        WHERE id = %s
+        LIMIT 1
         """,
-
         (patient_id,)
     )
 
-
     row = cursor.fetchone()
 
-
     if row is None:
-
         cursor.close()
         conn.close()
-
         raise HTTPException(
             status_code=404,
             detail="Patient not found"
         )
 
-
     columns = [
         description[0]
-        for description
-        in cursor.description
+        for description in cursor.description
     ]
 
-
-    patient = dict(
-        zip(
-            columns,
-            row
-        )
-    )
-
+    patient = normalize_patient_record(dict(zip(columns, row)))
 
     cursor.close()
     conn.close()
-
 
     return patient
 
@@ -659,48 +623,32 @@ def receptionist_patient_detail(
     cursor.execute(
         """
         SELECT *
-
-        FROM receptionist_patient_view
-
-        WHERE patient_id = %s
+        FROM patients
+        WHERE id = %s
+        LIMIT 1
         """,
-
         (patient_id,)
     )
 
-
     row = cursor.fetchone()
 
-
     if row is None:
-
         cursor.close()
         conn.close()
-
         raise HTTPException(
             status_code=404,
             detail="Patient not found"
         )
 
-
     columns = [
         description[0]
-        for description
-        in cursor.description
+        for description in cursor.description
     ]
 
-
-    patient = dict(
-        zip(
-            columns,
-            row
-        )
-    )
-
+    patient = normalize_patient_record(dict(zip(columns, row)))
 
     cursor.close()
     conn.close()
-
 
     return patient
 
@@ -925,759 +873,32 @@ def chatbot(
     data: ChatRequest,
     current_user=Depends(get_current_user)
 ):
-
-    message = data.message.strip()
-
-    role = current_user["role"]
-
-    user_id = current_user["user_id"]
-
+    message = (data.message or "").strip()
 
     if not message:
-
         raise HTTPException(
             status_code=400,
-            detail="Message cannot be empty"
+            detail="Message cannot be empty",
         )
 
-
-    lower_message = message.lower()
-
-
-    # ======================================================
-    # CURRENT USER DOCUMENT
-    # ==========================================================
-
-    document = uploaded_documents.get(
-        user_id
-    )
-
-
-    # ======================================================
-    # DETECT PATIENT ID
-    # ==========================================================
-
-    patient_match = re.search(
-        r"\bMED\d{5}\b",
-        message.upper()
-    )
-
-
-    patient_id = (
-
-        patient_match.group(0)
-
-        if patient_match
-
-        else None
-
-    )
-
-
-    # ======================================================
-    # DETECT DOCUMENT QUESTION
-    # ==========================================================
-
-    document_words = [
-
-        "document",
-        "file",
-        "pdf",
-        "txt",
-        "uploaded",
-        "upload"
-
-    ]
-
-
-    document_actions = [
-
-        "summarize",
-        "summary",
-        "what does it say",
-        "what does this say",
-        "what is in it",
-        "explain it"
-
-    ]
-
-
-    asking_about_document = (
-
-        any(
-            word in lower_message
-            for word in document_words
-        )
-
-        or
-
-        (
-            document is not None
-
-            and patient_id is None
-
-            and any(
-                phrase in lower_message
-                for phrase
-                in document_actions
-            )
-        )
-
-    )
-
-
-    # ======================================================
-    # DOCUMENT QUESTIONS
-    # ==========================================================
-
-    if asking_about_document:
-
-
-        if document is None:
-
-            return {
-
-                "reply":
-                    "You have not uploaded a PDF or TXT document yet."
-
-            }
-
-
-        document_text = document["text"]
-
-        filename = document["filename"]
-
-
-        # --------------------------------------------------
-        # Receptionist cannot access clinical document
-        # --------------------------------------------------
-
-        if (
-            role == "receptionist"
-
-            and
-
-            document_looks_clinical(
-                document_text
-            )
-        ):
-
-            raise HTTPException(
-                status_code=403,
-
-                detail=(
-                    "This document appears to contain clinical "
-                    "information. Receptionists are not authorized "
-                    "to access clinical document content."
-                )
-            )
-
-
-        # --------------------------------------------------
-        # Ask filename
-        # --------------------------------------------------
-
-        if (
-            "what file" in lower_message
-            or
-            "which file" in lower_message
-            or
-            "filename" in lower_message
-        ):
-
-            return {
-
-                "reply":
-                    f"The currently loaded document is {filename}."
-
-            }
-
-
-        # --------------------------------------------------
-        # Summarize
-        # --------------------------------------------------
-
-        if (
-            "summarize" in lower_message
-            or
-            "summary" in lower_message
-            or
-            "what does" in lower_message
-            or
-            "what is in" in lower_message
-            or
-            "explain" in lower_message
-        ):
-
-            summary = (
-                simple_document_summary(
-                    document_text
-                )
-            )
-
-
-            return {
-
-                "reply":
-                    f"Summary of {filename}: {summary}"
-
-            }
-
-
-        # --------------------------------------------------
-        # Search within document
-        # --------------------------------------------------
-
-        relevant_text = (
-            find_relevant_document_text(
-                document_text,
-                message
-            )
-        )
-
-
-        return {
-
-            "reply":
-                f"From {filename}: {relevant_text}"
-
-        }
-
-
-    # ======================================================
-    # NO PATIENT ID
-    # ==========================================================
-
-    if patient_id is None:
-
-
-        if role == "doctor":
-
-            response = (
-
-                "I can retrieve clinical information from "
-                "the MediLink EHR. Include a patient ID "
-                "such as MED00001. You can ask about "
-                "diagnosis, medication, allergies, labs, "
-                "blood group or last visit."
-
-            )
-
-
-            if document:
-
-                response += (
-
-                    f" You currently have "
-                    f"{document['filename']} loaded. "
-                    "You can ask me to summarize or search "
-                    "the uploaded document."
-
-                )
-
-
-            return {
-                "reply":
-                    response
-            }
-
-
-        if role == "receptionist":
-
-            response = (
-
-                "I can retrieve administrative patient "
-                "information such as appointments, insurance, "
-                "contact details, doctor or department. "
-                "Include a patient ID such as MED00001."
-
-            )
-
-
-            if document:
-
-                response += (
-
-                    f" You currently have "
-                    f"{document['filename']} loaded."
-
-                )
-
-
-            return {
-                "reply":
-                    response
-            }
-
-
+    if current_user["role"] not in {"doctor", "receptionist"}:
         raise HTTPException(
             status_code=403,
-            detail="Unsupported role"
+            detail="Unsupported role",
         )
 
-
-    # ======================================================
-    # DOCTOR CHAT
-    # ==========================================================
-
-    if role == "doctor":
-
-        conn = get_db_connection()
-
-        cursor = conn.cursor()
-
-
-        cursor.execute(
-            """
-            SELECT *
-
-            FROM doctor_patient_view
-
-            WHERE patient_id = %s
-            """,
-
-            (patient_id,)
-        )
-
-
-        row = cursor.fetchone()
-
-
-        if row is None:
-
-            cursor.close()
-            conn.close()
-
-            return {
-
-                "reply":
-                    f"No patient was found with ID {patient_id}."
-
-            }
-
-
-        columns = [
-
-            description[0]
-
-            for description
-            in cursor.description
-
-        ]
-
-
-        patient = dict(
-            zip(
-                columns,
-                row
-            )
-        )
-
-
-        cursor.close()
-        conn.close()
-
-
-        # Diagnosis
-
-        if (
-            "diagnosis" in lower_message
-            or
-            "condition" in lower_message
-        ):
-
-            return {
-
-                "reply":
-                    f"{patient_id}'s recorded diagnosis is "
-                    f"{patient['diagnosis_summary']}."
-
-            }
-
-
-        # Medication
-
-        if (
-            "medication" in lower_message
-            or
-            "medicine" in lower_message
-            or
-            "prescription" in lower_message
-        ):
-
-            return {
-
-                "reply":
-                    f"{patient_id}'s recorded medication is "
-                    f"{patient['medications']}."
-
-            }
-
-
-        # Allergies
-
-        if (
-            "allergy" in lower_message
-            or
-            "allergies" in lower_message
-        ):
-
-            return {
-
-                "reply":
-                    f"{patient_id}'s recorded allergies are "
-                    f"{patient['allergies']}."
-
-            }
-
-
-        # Labs
-
-        if (
-            "lab" in lower_message
-            or
-            "test" in lower_message
-        ):
-
-            return {
-
-                "reply":
-                    f"The latest lab summary for {patient_id} is "
-                    f"{patient['lab_summary']}."
-
-            }
-
-
-        # Blood group
-
-        if (
-            "blood group" in lower_message
-            or
-            "blood type" in lower_message
-        ):
-
-            return {
-
-                "reply":
-                    f"{patient_id}'s blood group is "
-                    f"{patient['blood_group']}."
-
-            }
-
-
-        # Last visit
-
-        if "visit" in lower_message:
-
-            return {
-
-                "reply":
-                    f"{patient_id}'s last recorded visit was "
-                    f"{patient['last_visit']}."
-
-            }
-
-
-        # Doctor / department
-
-        if (
-            "doctor" in lower_message
-            or
-            "department" in lower_message
-        ):
-
-            return {
-
-                "reply":
-                    f"{patient_id} is assigned to "
-                    f"{patient['assigned_doctor']} "
-                    f"in {patient['department']}."
-
-            }
-
-
-        # General clinical summary
-
-        return {
-
-            "reply":
-
-                f"Patient "
-                f"{patient['first_name']} "
-                f"{patient['last_name']} "
-                f"({patient_id}). "
-
-                f"Blood group: "
-                f"{patient['blood_group']}. "
-
-                f"Department: "
-                f"{patient['department']}. "
-
-                f"Assigned doctor: "
-                f"{patient['assigned_doctor']}. "
-
-                f"Diagnosis: "
-                f"{patient['diagnosis_summary']}. "
-
-                f"Medication: "
-                f"{patient['medications']}. "
-
-                f"Allergies: "
-                f"{patient['allergies']}. "
-
-                f"Lab summary: "
-                f"{patient['lab_summary']}. "
-
-                f"Last visit: "
-                f"{patient['last_visit']}."
-
-        }
-
-
-    # ======================================================
-    # RECEPTIONIST CHAT
-    # ==========================================================
-
-    if role == "receptionist":
-
-
-        # --------------------------------------------------
-        # Block clinical requests
-        # --------------------------------------------------
-
-        clinical_words = [
-
-            "diagnosis",
-            "condition",
-            "medication",
-            "medicine",
-            "prescription",
-            "allergy",
-            "allergies",
-            "lab",
-            "test result",
-            "clinical",
-            "treatment"
-
-        ]
-
-
-        if any(
-
-            word in lower_message
-
-            for word
-            in clinical_words
-
-        ):
-
-            raise HTTPException(
-                status_code=403,
-
-                detail=(
-                    "Receptionists are not authorized "
-                    "to access clinical patient information."
-                )
-            )
-
-
-        conn = get_db_connection()
-
-        cursor = conn.cursor()
-
-
-        cursor.execute(
-            """
-            SELECT *
-
-            FROM receptionist_patient_view
-
-            WHERE patient_id = %s
-            """,
-
-            (patient_id,)
-        )
-
-
-        row = cursor.fetchone()
-
-
-        if row is None:
-
-            cursor.close()
-            conn.close()
-
-            return {
-
-                "reply":
-                    f"No patient was found with ID {patient_id}."
-
-            }
-
-
-        columns = [
-
-            description[0]
-
-            for description
-            in cursor.description
-
-        ]
-
-
-        patient = dict(
-            zip(
-                columns,
-                row
-            )
-        )
-
-
-        cursor.close()
-        conn.close()
-
-
-        # Appointment
-
-        if (
-            "appointment" in lower_message
-            or
-            "schedule" in lower_message
-        ):
-
-            return {
-
-                "reply":
-                    f"{patient_id}'s next appointment is "
-                    f"{patient['next_appointment']} with "
-                    f"{patient['assigned_doctor']} in "
-                    f"{patient['department']}. "
-                    f"Status: "
-                    f"{patient['appointment_status']}."
-
-            }
-
-
-        # Insurance
-
-        if (
-            "insurance" in lower_message
-            or
-            "policy" in lower_message
-        ):
-
-            return {
-
-                "reply":
-                    f"{patient_id} is registered with "
-                    f"{patient['insurance_provider']}. "
-                    f"Policy number: "
-                    f"{patient['policy_number']}."
-
-            }
-
-
-        # Phone
-
-        if (
-            "phone" in lower_message
-            or
-            "contact" in lower_message
-        ):
-
-            return {
-
-                "reply":
-                    f"{patient['first_name']} "
-                    f"{patient['last_name']}'s registered "
-                    f"phone number is "
-                    f"{patient['phone']}."
-
-            }
-
-
-        # Email
-
-        if "email" in lower_message:
-
-            return {
-
-                "reply":
-                    f"{patient['first_name']} "
-                    f"{patient['last_name']}'s registered "
-                    f"email is {patient['email']}."
-
-            }
-
-
-        # Address
-
-        if "address" in lower_message:
-
-            return {
-
-                "reply":
-                    f"{patient['first_name']} "
-                    f"{patient['last_name']}'s registered "
-                    f"address is {patient['address']}."
-
-            }
-
-
-        # Doctor / department
-
-        if (
-            "doctor" in lower_message
-            or
-            "department" in lower_message
-        ):
-
-            return {
-
-                "reply":
-                    f"{patient_id} is assigned to "
-                    f"{patient['assigned_doctor']} "
-                    f"in {patient['department']}."
-
-            }
-
-
-        # General admin summary
-
-        return {
-
-            "reply":
-
-                f"Patient "
-                f"{patient['first_name']} "
-                f"{patient['last_name']} "
-                f"({patient_id}). "
-
-                f"Phone: "
-                f"{patient['phone']}. "
-
-                f"Insurance: "
-                f"{patient['insurance_provider']}. "
-
-                f"Assigned doctor: "
-                f"{patient['assigned_doctor']}. "
-
-                f"Department: "
-                f"{patient['department']}. "
-
-                f"Next appointment: "
-                f"{patient['next_appointment']}. "
-
-                f"Status: "
-                f"{patient['appointment_status']}."
-
-        }
-
-
-    raise HTTPException(
-        status_code=403,
-        detail="Unsupported role"
-    )
+    try:
+        response_text = run_agent(message)
+        return {"response": response_text}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import logging
+        logging.exception("Chat agent failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to process the request right now. Please try again later.",
+        ) from exc
 
 
 # ==========================================================
