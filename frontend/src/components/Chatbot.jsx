@@ -76,7 +76,7 @@ function Chatbot({
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ message: backendMessage }),
+        body: JSON.stringify({\n          message: backendMessage,\n          history: messages\n            .filter((item) => item.sender === "user" || item.sender === "bot")\n            .map((item) => ({\n              role: item.sender === "user" ? "user" : "assistant",\n              content: item.text,\n            })),\n        }),
       });
 
       const data = await response.json();
