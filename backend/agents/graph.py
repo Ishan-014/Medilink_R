@@ -1,29 +1,19 @@
-from typing import Any, Dict, List
-
+from typing import Any, Dict
 from langgraph.graph import StateGraph, END
-
 from backend.agents.state import AgentState
-from backend.agents.nodes import choose_tool, execute_tool, generate_final_response
+from backend.agents.nodes import run_agent
 
+def agent_node(state: AgentState) -> Dict[str, Any]:
+    return {"final_response": run_agent(state.user_message, state.history)}
 
-def build_graph():
-    workflow = StateGraph(AgentState)
+workflow = StateGraph(AgentState)
+workflow.add_node("agent", agent_node)
+workflow.set_entry_point("agent")
+workflow.add_edge("agent", END)
+_graph = workflow.compile()
 
-    workflow.add_node("choose_tool", choose_tool)
-    workflow.add_node("execute_tool", execute_tool)
-    workflow.add_node("generate_final_response", generate_final_response)
-
-    workflow.set_entry_point("choose_tool")
-    workflow.add_edge("choose_tool", "execute_tool")
-    workflow.add_edge("execute_tool", "generate_final_response")
-    workflow.add_edge("generate_final_response", END)
-
-    return workflow.compile()
-
-
-def run_agent(user_message: str) -> str:
-    graph = build_graph()
-    result = graph.invoke({"user_message": user_message})
+def run_conversation(user_message: str, history=None) -> str:
+    result = _graph.invoke({"user_message": user_message, "history": history or []})
     if hasattr(result, "model_dump"):
         result = result.model_dump()
     return result.get("final_response", "I could not answer that request.")
