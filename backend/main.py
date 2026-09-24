@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from pydantic import BaseModel
 
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
@@ -32,7 +32,7 @@ from pypdf import PdfReader
 
 from backend.auth.router import router as auth_router
 from backend.auth.credentials import JWT_SECRET, JWT_ALGORITHM
-from backend.agents.graph import run_agent
+from backend.agents.graph import run_conversation
 # ==========================================================
 # FASTAPI APPLICATION
 # ==========================================================
@@ -149,6 +149,7 @@ class LoginRequest(BaseModel):
 class ChatRequest(BaseModel):
 
     message: str
+    history: List[dict] = []
 
 
 # ==========================================================
@@ -888,7 +889,7 @@ def chatbot(
         )
 
     try:
-        response_text = run_agent(message)
+        response_text = run_conversation(message, history=data.history)
         return {"response": response_text}
     except HTTPException:
         raise
