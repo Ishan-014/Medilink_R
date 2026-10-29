@@ -12,6 +12,7 @@ from backend.api.workflows import router as workflow_router
 from backend.api.documents import router as document_router
 from backend.api.upload_limits import UploadLimitMiddleware
 from backend.api.integrations import router as integration_router
+from backend.api.business import router as business_router
 from backend.integrations.client import HospitalClient
 from backend.auth.router import router as staff_auth_router
 from backend.core.config import Settings, get_settings
@@ -36,7 +37,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response = await call_next(request)
         response.headers["X-Request-ID"] = request.state.request_id
         if (request.url.path.startswith("/api/documents") or request.url.path.endswith("/tool-calls")
-                or request.url.path.startswith("/api/integrations")):
+                or request.url.path.startswith(("/api/integrations", "/api/onboarding", "/api/claims", "/api/patients", "/api/appointments"))
+                or request.url.path.endswith(("/case", "/advance", "/evidence"))):
             response.headers["Cache-Control"] = "private, no-store"
             response.headers["X-Content-Type-Options"] = "nosniff"
         return response
@@ -48,4 +50,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(staff_auth_router)
     app.include_router(document_router)
     app.include_router(integration_router)
+    app.include_router(business_router)
     return app

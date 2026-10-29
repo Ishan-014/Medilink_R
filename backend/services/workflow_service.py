@@ -35,7 +35,7 @@ def lock_key(cursor, scope: str):
 
 def check_access(row: dict, user: dict):
     # Return 404 for someone else's workflow rather than confirming it exists.
-    if user["role"] not in READERS and row["owner_user_id"] != user["user_id"]:
+    if user["role"] not in READERS and row["owner_user_id"] != user["user_id"] and row.get("subject_user_id") != user["user_id"]:
         raise HTTPException(404, "Workflow not found")
 
 
@@ -55,7 +55,7 @@ def serialize(cursor, row) -> WorkflowRun:
         for step in cursor.fetchall()
     ]
     return WorkflowRun(**{
-        key: row[key] for key in ("id", "owner_user_id", "workflow_type", "status", "created_at", "updated_at", "version", "document_ids")
+        key: row[key] for key in ("id", "owner_user_id", "workflow_type", "status", "created_at", "updated_at", "version", "document_ids", "managed_kind", "subject_user_id")
     }, steps=steps)
 
 
@@ -68,8 +68,8 @@ def get_workflow(settings, workflow_id: str, user: dict):
 def list_workflows(settings, user, *, status=None, workflow_type=None, limit=50, offset=0):
     clauses, params = [], []
     if user["role"] not in READERS:
-        clauses.append("owner_user_id = %s")
-        params.append(user["user_id"])
+        clauses.append("(owner_user_id = %s OR subject_user_id = %s)")
+        params.extend([user["user_id"], user["user_id"]])
     if status:
         clauses.append("status = %s")
         params.append(status.value)
@@ -85,37 +85,42 @@ def list_workflows(settings, user, *, status=None, workflow_type=None, limit=50,
             return [serialize(cursor, row) for row in rows]
 
 
+def insert_workflow(cursor, body, user, key, *, payload=None):
+    request_hash = fingerprint(payload if payload is not None else body.model_dump(mode="json"))
+    if key:
+        lock_key(cursor, f"workflow-create:{user['user_id']}:{key}")
+        cursor.execute("""
+            SELECT fingerprint, workflow_id FROM workflow_creation_keys
+            WHERE owner_user_id = %s AND idempotency_key = %s
+        """, (user["user_id"], key))
+        prior = cursor.fetchone()
+        if prior:
+            if prior["fingerprint"] != request_hash:
+                raise HTTPException(409, "Idempotency key was used for a different request")
+            return load(cursor, str(prior["workflow_id"]), user), True
+    workflow_id = str(uuid4())
+    cursor.execute("""
+        INSERT INTO workflow_runs (id, owner_user_id, workflow_type, request, document_ids)
+        VALUES (%s, %s, %s, %s, %s) RETURNING *
+    """, (workflow_id, user["user_id"], body.workflow_type.value, body.request,
+          Json([str(d) for d in body.document_ids])))
+    row = cursor.fetchone()
+    link_documents(cursor, workflow_id, body.document_ids, user)
+    if key:
+        cursor.execute("""
+            INSERT INTO workflow_creation_keys (owner_user_id, idempotency_key, fingerprint, workflow_id)
+            VALUES (%s, %s, %s, %s)
+        """, (user["user_id"], key, request_hash, workflow_id))
+    return dict(row), False
+
+
 def create_workflow(settings, body, user, key: str | None):
     if user["role"] == Role.AUDITOR:
         raise HTTPException(403, "Auditors have read-only access")
-    request_hash = fingerprint(body.model_dump(mode="json"))
     with connection(settings) as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            if key:
-                lock_key(cursor, f"workflow-create:{user['user_id']}:{key}")
-                cursor.execute("""
-                    SELECT fingerprint, workflow_id FROM workflow_creation_keys
-                    WHERE owner_user_id = %s AND idempotency_key = %s
-                """, (user["user_id"], key))
-                prior = cursor.fetchone()
-                if prior:
-                    if prior["fingerprint"] != request_hash:
-                        raise HTTPException(409, "Idempotency key was used for a different request")
-                    return serialize(cursor, load(cursor, str(prior["workflow_id"]), user)), True
-            workflow_id = str(uuid4())
-            cursor.execute("""
-                INSERT INTO workflow_runs (id, owner_user_id, workflow_type, request, document_ids)
-                VALUES (%s, %s, %s, %s, %s) RETURNING *
-            """, (workflow_id, user["user_id"], body.workflow_type.value, body.request,
-                  Json([str(d) for d in body.document_ids])))
-            row = cursor.fetchone()
-            link_documents(cursor, workflow_id, body.document_ids, user)
-            if key:
-                cursor.execute("""
-                    INSERT INTO workflow_creation_keys (owner_user_id, idempotency_key, fingerprint, workflow_id)
-                    VALUES (%s, %s, %s, %s)
-                """, (user["user_id"], key, request_hash, workflow_id))
-            return serialize(cursor, row), False
+            row, replayed = insert_workflow(cursor, body, user, key)
+            return serialize(cursor, row), replayed
 
 
 def check_version(row, expected):
@@ -130,6 +135,8 @@ def change_workflow(settings, workflow_id, user, body, *, plan=False):
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             row = load(cursor, workflow_id, user, lock=True)
             check_version(row, body.expected_version)
+            if row["managed_kind"]:
+                raise HTTPException(409, "Use the managed workflow endpoints for this case")
             if plan:
                 if row["status"] != "PLANNING":
                     raise HTTPException(409, "Plans may only be supplied during PLANNING")
@@ -180,4 +187,8 @@ def cancel_workflow(settings, workflow_id, user, expected_version):
                 UPDATE workflow_runs SET status = 'CANCELLED', version = version + 1,
                     updated_at = clock_timestamp() WHERE id = %s RETURNING *
             """, (workflow_id,))
-            return serialize(cursor, cursor.fetchone())
+            updated = dict(cursor.fetchone())
+            if row["managed_kind"]:
+                from backend.services.business_service import close_case
+                close_case(cursor, workflow_id, "cancelled")
+            return serialize(cursor, updated)

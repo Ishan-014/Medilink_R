@@ -97,6 +97,8 @@ class WorkflowRun(Contract):
     updated_at: datetime
     version: int = Field(default=0, ge=0)
     document_ids: list[UUID] = Field(default_factory=list)
+    managed_kind: Literal["onboarding", "insurance_claim"] | None = None
+    subject_user_id: str | None = None
     steps: list[WorkflowStep] = Field(default_factory=list)
 
 

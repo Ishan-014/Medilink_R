@@ -69,6 +69,11 @@ def prepare(settings, workflow_id, user, body):
             check_version(workflow, body.expected_version)
             if workflow["status"] != "EXECUTING":
                 raise HTTPException(409, "Workflow must be EXECUTING before calling hospital tools")
+            if workflow["managed_kind"]:
+                from backend.services.business_service import expected_arguments
+                expected = expected_arguments(cursor, workflow_id, body.operation)
+                if expected is None or expected != body.arguments:
+                    raise HTTPException(409, "Tool arguments must match the persisted case intake")
             cursor.execute("SELECT * FROM workflow_steps WHERE id = %s AND workflow_id = %s FOR UPDATE",
                            (str(body.step_id), workflow_id))
             step = cursor.fetchone()
@@ -95,7 +100,7 @@ def prepare(settings, workflow_id, user, body):
     return call_id, server, tool_name
 
 
-def finalize(settings, call_id, duration_ms, error: IntegrationError | None = None):
+def finalize(settings, call_id, duration_ms, error: IntegrationError | None = None, *, arguments=None, result=None):
     with connection(settings) as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT workflow_id FROM tool_calls WHERE id = %s", (call_id,))
@@ -119,6 +124,13 @@ def finalize(settings, call_id, duration_ms, error: IntegrationError | None = No
             next_status = "FAILED" if error is not None and workflow_status == "EXECUTING" else workflow_status
             cursor.execute("""UPDATE workflow_runs SET status = %s, version = version + 1,
                 updated_at = clock_timestamp() WHERE id = %s""", (next_status, str(workflow_id)))
+            if workflow_status == "EXECUTING":
+                if error is None:
+                    from backend.services.business_evidence import capture
+                    capture(cursor, row, arguments, result)
+                else:
+                    from backend.services.business_service import close_case
+                    close_case(cursor, str(workflow_id), "failed")
             return record(row)
 
 
@@ -140,7 +152,13 @@ async def execute(settings, client, workflow_id, user, body):
         error = IntegrationError("MCP_UNAVAILABLE", dispatched=True)
         await run_in_threadpool(finalize, settings, call_id, int((time.monotonic() - start) * 1000), error)
         raise error from exc
-    completed = await run_in_threadpool(finalize, settings, call_id, int((time.monotonic() - start) * 1000))
+    try:
+        completed = await run_in_threadpool(finalize, settings, call_id, int((time.monotonic() - start) * 1000),
+                                           arguments=body.arguments, result=result)
+    except IntegrationError as exc:
+        # Domain validation rolls back the attempted success before recording failure.
+        await run_in_threadpool(finalize, settings, call_id, int((time.monotonic() - start) * 1000), exc)
+        raise
     return ToolCallOutput(call=completed, result=result)
 
 

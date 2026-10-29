@@ -225,3 +225,21 @@ def test_part4_upgrade_preserves_data_and_rejects_cross_workflow_calls(database,
             cursor.execute("""INSERT INTO tool_calls (id,workflow_id,workflow_step_id,actor_user_id,server,tool,request_fingerprint)
                 VALUES (%s,%s,%s,'existing','ehr','get_patient',%s)""", (str(uuid4()), second, step, "a" * 64))
         cursor.execute("ROLLBACK TO SAVEPOINT invalid_call")
+
+
+def test_part5_upgrade_keeps_legacy_patients_and_prior_workflows(database, tmp_path):
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if path.name < "0005":
+            (tmp_path / path.name).write_bytes(path.read_bytes())
+    migrate(database, directory=tmp_path)
+    workflow_id = str(uuid4())
+    with database.cursor() as cursor:
+        cursor.execute("CREATE TABLE patients (legacy_marker TEXT)")
+        cursor.execute("INSERT INTO patients VALUES ('original-EHR-record')")
+        cursor.execute("INSERT INTO workflow_runs (id,owner_user_id,workflow_type,request) VALUES (%s,'existing','onboarding','Existing request')", (workflow_id,))
+    migrate(database)
+    with database.cursor() as cursor:
+        cursor.execute("SELECT * FROM patients")
+        assert cursor.fetchall() == [("original-EHR-record",)]
+        cursor.execute("SELECT request,managed_kind,subject_user_id FROM workflow_runs WHERE id=%s", (workflow_id,))
+        assert cursor.fetchone() == ("Existing request", None, None)

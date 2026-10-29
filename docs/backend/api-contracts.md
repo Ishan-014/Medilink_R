@@ -1,10 +1,12 @@
-# Backend integration contracts (Part 4)
+# Backend integration contracts (Part 5)
 
 Implemented: health, patient auth, current identity, admin provisioning, workflow
 creation/list/detail/plan/transitions/cancellation, and persistent document APIs.
 See [part-2.md](part-2.md) for auth/workflows and [part-3.md](part-3.md) for document
 setup, permissions and extraction handoff. [Part 4](part-4.md) adds controlled
-hospital-tool execution and trace metadata. Audit routes remain planned. Existing
+hospital-tool execution and trace metadata. [Part 5](part-5.md) adds managed
+onboarding/claim preparation and local patient/claim/appointment records. Audit
+routes remain planned. Existing
 unprefixed routes retain their response formats.
 Ownership and current roles are always resolved server-side.
 
@@ -52,6 +54,17 @@ and `INTERNAL_ERROR`; other HTTP statuses use `HTTP_ERROR`.
 | GET `/api/integrations/{name}/health` | Configured server name | Admin/auditor: protocol/schema health, available backend read names |
 | POST `/api/workflows/{id}/tool-calls` | `expected_version`, `step_id`, `operation`, `arguments` | Doctor/admin: persisted call metadata and validated structured result |
 | GET `/api/workflows/{id}/tool-calls` | `limit`, `offset` | Authorized workflow readers: call metadata without payloads |
+| POST `/api/onboarding` | Patient intake; optional staff-selected patient_user_id | Managed case and draft profile; idempotent start |
+| PATCH `/api/onboarding/{workflow_id}` | expected_version and supplied intake corrections | Resume a case waiting for data |
+| POST `/api/claims` | Confirmed patient_profile_id, policy/procedure/amount/currency | Managed claim-preparation case |
+| PATCH `/api/claims/{workflow_id}/intake` | expected_version and supplied corrections | Resume claim evidence collection |
+| GET `/api/workflows/{id}/case` | Workflow UUID | Authorized managed phase/missing fields/entity reference |
+| POST `/api/workflows/{id}/advance` | expected_version | Doctor/admin: one recipe-bound MCP operation |
+| GET `/api/workflows/{id}/evidence` | Workflow UUID | Authorized selected typed facts with source-call IDs |
+| GET `/api/patients/{id}` | Local profile UUID | Authorized local profile; not the legacy EHR endpoint |
+| GET `/api/claims/{id}` | Claim UUID | Authorized claim record |
+| POST `/api/appointments` | Profile UUID, doctor reference, future aware time, duration | Persistent appointment draft; never a false booking |
+| GET `/api/appointments/{id}` | Appointment UUID | Authorized appointment draft |
 | GET `/api/workflows/{id}/trace` (planned) | Workflow UUID | Authorized plan, steps, tool-call references, approvals, errors, and audit events; finalized in Part 8 |
 | GET `/api/audit` (planned) | Pagination/date/status filters; finalized in Part 8 | Authorized `AuditEvent` collection |
 
@@ -105,3 +118,9 @@ Part 4 integration errors add `MCP_NOT_CONFIGURED`, `MCP_CONFIG_INVALID`,
 Tool calls require the matching ordered plan step in an executing workflow. All
 writes remain blocked until the Part 7 gate exists. The unchanged agent's direct
 function calls are not routed through this new boundary by Part 4.
+
+Part 5 managed workflows add `managed_kind` and `subject_user_id` to workflow
+responses. Generic plan/status mutations cannot bypass the managed domain service.
+Actual creation/submission remains blocked pending Part 7; prepared claims are
+not submitted claims. See the Part 5 contract table for required business facts
+in EHR, billing and insurance responses.
