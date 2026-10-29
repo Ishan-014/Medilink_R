@@ -1,4 +1,4 @@
-# Backend integration contracts (Part 7)
+# Backend integration contracts (Part 8)
 
 Implemented: health, patient auth, current identity, admin provisioning, workflow
 creation/list/detail/plan/transitions/cancellation, and persistent document APIs.
@@ -9,7 +9,8 @@ onboarding/claim preparation and local patient/claim/appointment records.
 [Part 6](part-6.md) adds the graph service boundary and graph-dependent claim
 evidence. [Part 7](part-7.md) adds authoritative risk policy, approval queues,
 canonical action previews, independent approve/reject decisions and single-use
-approved execution. Audit routes remain planned. Existing
+approved execution. [Part 8](part-8.md) adds audit/event feeds, paginated workflow
+traces, consistent backend error codes and authoritative receipt reconciliation. Existing
 unprefixed routes retain their response formats.
 Ownership and current roles are always resolved server-side.
 
@@ -71,8 +72,16 @@ and `INTERNAL_ERROR`; other HTTP statuses use `HTTP_ERROR`.
 | GET `/api/graph/health` | Bearer token | Admin/auditor: configured graph facade readiness |
 | POST `/api/workflows/{id}/graph-queries` | expected_version, step_id, confirmed patient_profile_id, fixed operation | Doctor/admin: validated result and persisted reference metadata |
 | GET `/api/workflows/{id}/graph-queries` | limit, offset | Authorized workflow readers: references/counts only |
-| GET `/api/workflows/{id}/trace` (planned) | Workflow UUID | Authorized plan, steps, tool-call references, approvals, errors, and audit events; finalized in Part 8 |
-| GET `/api/audit` (planned) | Pagination/date/status filters; finalized in Part 8 | Authorized `AuditEvent` collection |
+| GET `/api/risk-policy` | Bearer token | Authoritative policy/version and enabled write categories |
+| GET `/api/approvals` | limit, offset | Doctor/admin pending review queue |
+| GET/POST `/api/workflows/{id}/approvals` | GET history; POST expected_version, reason | Scoped metadata / request or refresh canonical action review |
+| GET `/api/workflows/{id}/approvals/{approval_id}/review` | Approval UUID | Authorized reviewer: canonical arguments, scope match and events |
+| POST `/api/workflows/{id}/approve` or `/reject` | expected_version, approval_id, reason | Independent authorized reviewer; persisted decision |
+| GET `/api/workflows/{id}/trace` | limit, offset | Scoped current workflow/steps and paginated audit/system history with next_offset |
+| GET `/api/audit` | limit, offset, workflow_id, actor_user_id, outcome, after/before | Admin/auditor: typed AuditRecord page with next_offset |
+| GET `/api/system-events` | limit, offset, workflow_id, code, after/before | Admin/auditor: typed SystemEvent page with next_offset |
+| POST `/api/workflows/{id}/tool-calls/{call_id}/reconcile` | expected_version, reason | Admin: authoritative receipt lookup; never retries the write |
+| GET `/api/workflows/{id}/reconciliations` | limit, offset | Scoped attempt metadata, actor/reason and authoritative outcome references |
 
 Roles: `patient`, `doctor`, `receptionist`, `admin`, `auditor`. Doctor and receptionist
 are distinct staff roles; there is no unrestricted shared `staff` role.
@@ -100,7 +109,7 @@ Workflow statuses: `CREATED`, `PLANNING`, `WAITING_FOR_DATA`, `EXECUTING`,
 `WAITING_FOR_APPROVAL`, `COMPLETED`, `FAILED`, `REJECTED`, `CANCELLED`. The Part 2 service enforces
 transitions, authenticated ownership, optimistic versions, and protected approval
 states. It persists plans without invoking the AI/MCP layer. Risk tiers are `low`, `medium`,
-`high`; authoritative risk classification/approval enforcement arrives in Part 7.
+`high`; authoritative risk classification and approval enforcement are implemented in Part 7.
 
 `DocumentMetadata` contains UUID `id`, `filename`, `media_type`, `size_bytes`,
 `extraction_status` (`pending`, `processing`, `completed`, `failed`), `created_at`,
@@ -109,8 +118,11 @@ states. It persists plans without invoking the AI/MCP layer. Risk tiers are `low
 are persisted separately from metadata and are subject to content-access checks.
 `AuditEvent` contains UUID `id`, optional `workflow_id`, `actor_user_id`, `action`,
 `resource_type`, `resource_id`, `outcome` (`success`, `denied`, `failure`), and
-`created_at`. Document persistence is implemented in Part 3; audit persistence
-remains Part 8 work.
+`created_at`. Part 8's `AuditRecord` adds `sequence`, `request_id` and allowlisted
+`metadata`. Document persistence is implemented in Part 3 and atomic audit
+persistence in Part 8. Date filters require timezones; trace/audit/event pages
+return `next_offset` until exhausted. See the Part 8 receipt contract before
+connecting a recovery facade.
 
 The backend contract is separate from LangGraph's internal agent state. AI/MCP
 owners should map their execution results to these boundaries without sharing

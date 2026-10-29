@@ -12,6 +12,7 @@ from pwdlib.exceptions import UnknownHashError
 from backend.api.schemas import CurrentUser, Role
 from backend.core.config import Settings, get_settings
 from backend.db.connection import connection
+from backend.observability.context import request_context
 
 PASSWORD_HASH = PasswordHash.recommended()
 DUMMY_HASH = PASSWORD_HASH.hash("unused-timing-comparison-password")
@@ -87,6 +88,9 @@ def current_identity(
         raise unauthorized()
     if user["role"] in STAFF_ROLES and payload["auth_level"] != 3:
         raise HTTPException(403, "Complete all three staff authentication steps")
+    context = request_context.get()
+    if context:
+        context.actor_user_id = user["user_id"]
     return {**dict(user), "auth_level": payload["auth_level"], "employee_id": user["user_id"]}
 
 

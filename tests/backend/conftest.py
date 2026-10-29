@@ -17,7 +17,7 @@ from backend.db.migrate import migrate
 TEST_PASSWORD = "Synthetic-password-2026!"
 TEST_SECRET = "part2-isolated-test-secret-with-more-than-32-characters"
 TEST_HASH = PASSWORD_HASH.hash(TEST_PASSWORD)
-TABLES = ("approval_events", "workflow_graph_queries", "appointments", "workflow_case_evidence", "workflow_cases", "claims", "patient_profiles",
+TABLES = ("audit_logs", "system_events", "external_reconciliations", "approval_events", "workflow_graph_queries", "appointments", "workflow_case_evidence", "workflow_cases", "claims", "patient_profiles",
           "tool_calls", "approvals", "workflow_documents", "document_extraction_results", "documents",
           "consumed_auth_stages", "workflow_action_keys", "workflow_creation_keys",
           "workflow_steps", "workflow_runs", "users", "schema_migrations")
@@ -84,4 +84,7 @@ def api_env(monkeypatch, tmp_path):
                 for name in TABLES:
                     cursor.execute(f"DROP TABLE public.{name}")
                 cursor.execute("DROP FUNCTION prevent_approval_event_changes()")
+                cursor.execute("DROP FUNCTION record_backend_change()")
+                cursor.execute("DROP FUNCTION prevent_trace_changes()")
+                cursor.execute("DROP FUNCTION backend_audit_metadata(jsonb,jsonb)")
         get_settings.cache_clear()

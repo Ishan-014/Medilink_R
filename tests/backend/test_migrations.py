@@ -287,3 +287,21 @@ def test_part7_upgrade_preserves_existing_calls_without_inventing_approvals(data
         assert cursor.fetchone() == ('legacy','medium',None)
         cursor.execute("SELECT count(*) FROM approvals")
         assert cursor.fetchone() == (0,)
+
+
+def test_part8_upgrade_retains_records_and_labels_history_snapshots(database,tmp_path):
+    for path in migration_files():
+        if path.name.startswith("0008_"):break
+        (tmp_path/path.name).write_bytes(path.read_bytes())
+    migrate(database,directory=tmp_path)
+    workflow_id=str(uuid4())
+    with database.cursor() as cursor:
+        cursor.execute("INSERT INTO workflow_runs (id,owner_user_id,workflow_type,request) VALUES (%s,'old-owner','onboarding','Private historical request')",(workflow_id,))
+    migrate(database)
+    with database.cursor() as cursor:
+        cursor.execute("SELECT request FROM workflow_runs WHERE id=%s",(workflow_id,))
+        assert cursor.fetchone()[0]=="Private historical request"
+        cursor.execute("SELECT action,metadata::text,actor_user_id FROM audit_logs WHERE workflow_id=%s",(workflow_id,))
+        action,metadata,actor=cursor.fetchone()
+        assert action=="workflow_runs.snapshot" and '"snapshot": true' in metadata
+        assert actor=="system:migration" and "Private" not in metadata

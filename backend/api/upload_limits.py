@@ -44,6 +44,7 @@ class UploadLimitMiddleware:
         request_id = scope.setdefault("state", {}).setdefault("request_id", uuid4().hex)
         body = {"detail": message}
         if scope["path"].startswith("/api/"):
+            scope["state"]["error_code"] = "FILE_TOO_LARGE" if status == 413 else "INVALID_REQUEST"
             body = {"error": {"code": "FILE_TOO_LARGE" if status == 413 else "INVALID_REQUEST",
                               "message": message, "details": []}, "request_id": request_id}
         response = JSONResponse(body, status_code=status, headers={"X-Request-ID": request_id})

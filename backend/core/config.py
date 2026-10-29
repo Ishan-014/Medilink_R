@@ -30,6 +30,10 @@ class Settings:
     graph_service_token: str | None = field(default=None, repr=False)
     graph_timeout_seconds: float = 10
     graph_max_results: int = 100
+    recovery_service_url: str | None = field(default=None,repr=False)
+    recovery_service_token: str | None = field(default=None,repr=False)
+    recovery_timeout_seconds: float = 10
+    reconciliation_stale_seconds: int = 300
     medium_risk_review: str = "required"
     approval_ttl_minutes: int = 60
     action_signing_secret: str | None = field(default=None, repr=False)
@@ -50,6 +54,8 @@ class Settings:
             raise ValueError("Document pixel and page limits must be positive")
         if not 0.1 <= self.graph_timeout_seconds <= 60 or not 1 <= self.graph_max_results <= 200:
             raise ValueError("Graph timeout must be 0.1–60 seconds and result limit 1–200")
+        if not 0.1 <= self.recovery_timeout_seconds <= 60 or not 300 <= self.reconciliation_stale_seconds <= 86400:
+            raise ValueError("Recovery timeout must be 0.1–60 seconds; stale age must be 300–86400 seconds")
         if self.medium_risk_review not in {"required", "automatic"} or not 1 <= self.approval_ttl_minutes <= 1440:
             raise ValueError("Medium risk review must be required/automatic; approval TTL must be 1–1440 minutes")
 
@@ -77,6 +83,10 @@ class Settings:
             graph_service_token=os.getenv("MEDILINK_GRAPH_SERVICE_TOKEN") or None,
             graph_timeout_seconds=float(os.getenv("MEDILINK_GRAPH_TIMEOUT_SECONDS", "10")),
             graph_max_results=int(os.getenv("MEDILINK_GRAPH_MAX_RESULTS", "100")),
+            recovery_service_url=os.getenv("MEDILINK_RECOVERY_SERVICE_URL") or None,
+            recovery_service_token=os.getenv("MEDILINK_RECOVERY_SERVICE_TOKEN") or None,
+            recovery_timeout_seconds=float(os.getenv("MEDILINK_RECOVERY_TIMEOUT_SECONDS","10")),
+            reconciliation_stale_seconds=int(os.getenv("MEDILINK_RECONCILIATION_STALE_SECONDS","300")),
             medium_risk_review=os.getenv("MEDILINK_MEDIUM_RISK_REVIEW", "required"),
             approval_ttl_minutes=int(os.getenv("MEDILINK_APPROVAL_TTL_MINUTES", "60")),
             action_signing_secret=os.getenv("MEDILINK_ACTION_SIGNING_SECRET") or None,

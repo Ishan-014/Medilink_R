@@ -180,6 +180,10 @@ def finalize(settings, call_id, duration_ms, error: IntegrationError | None = No
                 if error is None:
                     from backend.services.business_evidence import capture
                     capture(cursor, row, arguments, result, settings=settings)
+                    if is_write:
+                        cursor.execute("SELECT status FROM workflow_runs WHERE id=%s",(str(workflow_id),))
+                        if cursor.fetchone()["status"]!="COMPLETED":
+                            raise IntegrationError("MCP_OUTPUT_INVALID",dispatched=True)
                 else:
                     from backend.services.business_service import close_case
                     close_case(cursor, str(workflow_id), "failed")

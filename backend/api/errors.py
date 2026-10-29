@@ -1,6 +1,6 @@
 """Stable errors for /api routes; preserve legacy frontend error payloads."""
 
-import logging
+import psycopg2
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
@@ -13,7 +13,6 @@ from starlette.exceptions import HTTPException
 
 from backend.api.schemas import ErrorDetail, ErrorResponse
 
-logger = logging.getLogger(__name__)
 HTTP_CODES = {
     400: "INVALID_REQUEST", 401: "UNAUTHENTICATED", 403: "FORBIDDEN",
     404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED", 409: "CONFLICT",
@@ -28,6 +27,7 @@ def is_api(request: Request) -> bool:
 
 def error_response(request, status, code, message, details=None, headers=None):
     request_id = getattr(request.state, "request_id", uuid4().hex)
+    request.state.error_code = code
     body = ErrorResponse(
         error=ErrorDetail(code=code, message=message, details=details or []),
         request_id=request_id,
@@ -55,14 +55,26 @@ def install_error_handlers(app: FastAPI):
         if not is_api(request):
             return await request_validation_exception_handler(request, exc)
         # Exclude submitted values and validation context (may contain PII/secrets).
-        details = [{"location": list(e["loc"]), "type": e["type"]} for e in exc.errors()]
+        details = [{"location": list(e["loc"][:1] if e["type"]=="extra_forbidden" else e["loc"][:2]),
+                    "type": e["type"]} for e in exc.errors()]
         return error_response(request, 422, "VALIDATION_ERROR", "Request validation failed.", details)
+
+    @app.exception_handler(psycopg2.Error)
+    async def database_error(request: Request, exc: psycopg2.Error):
+        return failure_response(request, exc)
 
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception):
-        # Log a correlation identifier and error type, never exception text/data.
-        logger.error("Unhandled backend error request_id=%s type=%s",
-                     getattr(request.state, "request_id", "unknown"), type(exc).__name__)
-        if not is_api(request):
-            return JSONResponse(status_code=500, content={"detail": "Internal server error"})
-        return error_response(request, 500, "INTERNAL_ERROR", "An unexpected error occurred.")
+        return failure_response(request, exc)
+
+
+def failure_response(request, exc):
+    if not is_api(request):
+        return JSONResponse(status_code=500,content={"detail":"Internal server error"})
+    if isinstance(exc,psycopg2.errors.QueryCanceled):
+        return error_response(request,504,"DATABASE_TIMEOUT","Database operation timed out.")
+    if isinstance(exc,(psycopg2.OperationalError,psycopg2.InterfaceError)):
+        return error_response(request,503,"DATABASE_UNAVAILABLE","Database temporarily unavailable.")
+    if isinstance(exc,psycopg2.IntegrityError):
+        return error_response(request,409,"DATABASE_CONFLICT","Database change conflicts with existing state.")
+    return error_response(request,500,"INTERNAL_ERROR","An unexpected error occurred.")
