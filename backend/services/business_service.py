@@ -109,8 +109,11 @@ def start(settings, user, body, key, kind):
                 intake["patient_profile_id"] = str(profile["id"])
                 intake["external_patient_id"] = profile["external_patient_id"]
                 intake["patient_email"] = profile["contact_email"]
+            payload = body.model_dump(mode="json")
+            if kind == "insurance_claim" and not body.use_graph:
+                payload.pop("use_graph")  # Preserve Part 5 idempotency fingerprints.
             created, replayed = insert_workflow(cursor, WorkflowCreate(workflow_type=kind, request=body.request,
-                document_ids=body.document_ids or []), user, key, payload={"kind": kind, "body": body.model_dump(mode="json")})
+                document_ids=body.document_ids or []), user, key, payload={"kind": kind, "body": payload})
             workflow_id = str(created["id"])
             if replayed:
                 workflow, case = get_case(cursor, workflow_id, user)
@@ -134,6 +137,9 @@ def start(settings, user, body, key, kind):
             cursor.execute("""INSERT INTO workflow_cases (workflow_id,kind,subject_user_id,entity_id,intake,phase)
                 VALUES (%s,%s,%s,%s,%s,'waiting_data')""", (workflow_id, kind, subject, entity_id, Json(intake)))
             actions = ("ehr.search_patients",) if kind == "onboarding" else (*CLAIM_READS, "insurance.submit_claim")
+            if kind == "insurance_claim" and body.use_graph:
+                from backend.graph.contracts import GRAPH_OPERATIONS
+                actions = (*CLAIM_READS, *(f"graph.{op}" for op in GRAPH_OPERATIONS), "insurance.submit_claim")
             for pos, action in enumerate(actions):
                 add_step(cursor, workflow_id, action, pos)
             missing = missing_data(cursor, workflow_id, kind, intake)
@@ -161,6 +167,9 @@ def update_intake(settings, workflow_id, user, body, kind):
             cursor.execute("SELECT 1 FROM tool_calls WHERE workflow_id = %s AND (status <> 'succeeded' OR tool IN ('create_patient','submit_claim')) LIMIT 1", (workflow_id,))
             if cursor.fetchone():
                 raise HTTPException(409, "Uncertain or mutating operations require reconciliation")
+            cursor.execute("SELECT 1 FROM workflow_graph_queries WHERE workflow_id=%s AND status<>'succeeded' LIMIT 1", (workflow_id,))
+            if cursor.fetchone():
+                raise HTTPException(409, "Unfinished or failed graph queries require reconciliation")
             intake = {**case["intake"], **body.model_dump(mode="json", exclude_unset=True, exclude={"expected_version", "document_ids"})}
             if body.document_ids is not None:
                 cursor.execute("DELETE FROM workflow_documents WHERE workflow_id = %s", (workflow_id,))
@@ -218,16 +227,26 @@ def next_call(settings, workflow_id, user, expected_version):
             step = cursor.fetchone()
             if not step:
                 raise HTTPException(409, "No executable step remains")
+            if step["action"].startswith("graph."):
+                from backend.graph.contracts import GraphQueryInput
+                return GraphQueryInput(expected_version=expected_version, step_id=step["id"],
+                    patient_profile_id=case["intake"]["patient_profile_id"], operation=step["action"].split(".", 1)[1])
             args = expected_arguments(cursor, workflow_id, step["action"])
             body = ToolCallInput(expected_version=expected_version, step_id=step["id"], operation=step["action"], arguments=args)
     return body
 
 
-async def advance(settings, client, workflow_id, user, expected_version):
+async def advance(settings, client, workflow_id, user, expected_version, *, graph_client=None):
     from starlette.concurrency import run_in_threadpool
     from backend.services.tool_call_service import execute
     body = await run_in_threadpool(next_call, settings, workflow_id, user, expected_version)
-    await execute(settings, client, workflow_id, user, body)
+    from backend.graph.contracts import GraphQueryInput
+    if isinstance(body, GraphQueryInput):
+        from backend.graph.client import GraphClient
+        from backend.services.graph_service import execute as execute_graph
+        await execute_graph(settings, graph_client or GraphClient(), workflow_id, user, body)
+    else:
+        await execute(settings, client, workflow_id, user, body)
     return await run_in_threadpool(get_status, settings, workflow_id, user)
 
 

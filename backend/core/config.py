@@ -26,6 +26,10 @@ class Settings:
     document_max_image_pixels: int = 20_000_000
     document_max_pdf_pages: int = 100
     mcp_config_file: Path | None = None
+    graph_service_url: str | None = field(default=None, repr=False)
+    graph_service_token: str | None = field(default=None, repr=False)
+    graph_timeout_seconds: float = 10
+    graph_max_results: int = 100
     cors_origins: tuple[str, ...] = (
         "http://localhost:5173", "http://127.0.0.1:5173"
     )
@@ -41,6 +45,8 @@ class Settings:
             raise ValueError("MEDILINK_DOCUMENT_MAX_BYTES must be between 1 and 25 MiB")
         if self.document_max_image_pixels < 1 or self.document_max_pdf_pages < 1:
             raise ValueError("Document pixel and page limits must be positive")
+        if not 0.1 <= self.graph_timeout_seconds <= 60 or not 1 <= self.graph_max_results <= 200:
+            raise ValueError("Graph timeout must be 0.1–60 seconds and result limit 1–200")
 
     @classmethod
     def from_env(cls):
@@ -62,6 +68,10 @@ class Settings:
             document_max_pdf_pages=int(os.getenv("MEDILINK_DOCUMENT_MAX_PDF_PAGES", "100")),
             mcp_config_file=(PROJECT_ROOT / Path(os.environ["MEDILINK_MCP_CONFIG_FILE"]).expanduser()
                              if os.getenv("MEDILINK_MCP_CONFIG_FILE") else None),
+            graph_service_url=os.getenv("MEDILINK_GRAPH_SERVICE_URL") or None,
+            graph_service_token=os.getenv("MEDILINK_GRAPH_SERVICE_TOKEN") or None,
+            graph_timeout_seconds=float(os.getenv("MEDILINK_GRAPH_TIMEOUT_SECONDS", "10")),
+            graph_max_results=int(os.getenv("MEDILINK_GRAPH_MAX_RESULTS", "100")),
             cors_origins=tuple(
                 origin.strip() for origin in os.getenv(
                     "MEDILINK_CORS_ORIGINS",

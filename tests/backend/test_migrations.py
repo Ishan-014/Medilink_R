@@ -243,3 +243,27 @@ def test_part5_upgrade_keeps_legacy_patients_and_prior_workflows(database, tmp_p
         assert cursor.fetchall() == [("original-EHR-record",)]
         cursor.execute("SELECT request,managed_kind,subject_user_id FROM workflow_runs WHERE id=%s", (workflow_id,))
         assert cursor.fetchone() == ("Existing request", None, None)
+
+
+def test_part6_preserves_existing_cases_and_enforces_graph_step_membership(database, tmp_path):
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if path.name < "0006":
+            (tmp_path / path.name).write_bytes(path.read_bytes())
+    migrate(database, directory=tmp_path)
+    workflow_id, other_workflow, profile_id, step_id = (str(uuid4()) for _ in range(4))
+    with database.cursor() as cursor:
+        for item in (workflow_id, other_workflow):
+            cursor.execute("INSERT INTO workflow_runs (id,owner_user_id,workflow_type,request) VALUES (%s,'existing','onboarding','Existing request')", (item,))
+        cursor.execute("INSERT INTO patient_profiles (id,owner_user_id,onboarding_workflow_id,contact_email) VALUES (%s,'existing',%s,'existing@example.com')", (profile_id, workflow_id))
+        cursor.execute("INSERT INTO workflow_cases (workflow_id,kind,subject_user_id,entity_id,intake,phase) VALUES (%s,'onboarding','existing',%s,'{}','waiting_data')", (workflow_id, profile_id))
+        cursor.execute("INSERT INTO workflow_steps (id,workflow_id,position,action) VALUES (%s,%s,0,'graph.claim_history')", (step_id, workflow_id))
+    migrate(database)
+    with database.cursor() as cursor:
+        cursor.execute("SELECT intake,phase FROM workflow_cases WHERE workflow_id=%s", (workflow_id,))
+        assert cursor.fetchone() == ({}, "waiting_data")
+        cursor.execute("SAVEPOINT wrong_graph_workflow")
+        with pytest.raises(psycopg2.IntegrityError):
+            cursor.execute("""INSERT INTO workflow_graph_queries
+                (id,workflow_id,workflow_step_id,patient_profile_id,actor_user_id,operation,request_fingerprint)
+                VALUES (%s,%s,%s,%s,'existing','claim_history',%s)""", (str(uuid4()), other_workflow, step_id, profile_id, "a" * 64))
+        cursor.execute("ROLLBACK TO SAVEPOINT wrong_graph_workflow")

@@ -1,12 +1,13 @@
-# Backend integration contracts (Part 5)
+# Backend integration contracts (Part 6)
 
 Implemented: health, patient auth, current identity, admin provisioning, workflow
 creation/list/detail/plan/transitions/cancellation, and persistent document APIs.
 See [part-2.md](part-2.md) for auth/workflows and [part-3.md](part-3.md) for document
 setup, permissions and extraction handoff. [Part 4](part-4.md) adds controlled
 hospital-tool execution and trace metadata. [Part 5](part-5.md) adds managed
-onboarding/claim preparation and local patient/claim/appointment records. Audit
-routes remain planned. Existing
+onboarding/claim preparation and local patient/claim/appointment records.
+[Part 6](part-6.md) adds the graph service boundary and graph-dependent claim
+evidence. Audit routes remain planned. Existing
 unprefixed routes retain their response formats.
 Ownership and current roles are always resolved server-side.
 
@@ -65,6 +66,9 @@ and `INTERNAL_ERROR`; other HTTP statuses use `HTTP_ERROR`.
 | GET `/api/claims/{id}` | Claim UUID | Authorized claim record |
 | POST `/api/appointments` | Profile UUID, doctor reference, future aware time, duration | Persistent appointment draft; never a false booking |
 | GET `/api/appointments/{id}` | Appointment UUID | Authorized appointment draft |
+| GET `/api/graph/health` | Bearer token | Admin/auditor: configured graph facade readiness |
+| POST `/api/workflows/{id}/graph-queries` | expected_version, step_id, confirmed patient_profile_id, fixed operation | Doctor/admin: validated result and persisted reference metadata |
+| GET `/api/workflows/{id}/graph-queries` | limit, offset | Authorized workflow readers: references/counts only |
 | GET `/api/workflows/{id}/trace` (planned) | Workflow UUID | Authorized plan, steps, tool-call references, approvals, errors, and audit events; finalized in Part 8 |
 | GET `/api/audit` (planned) | Pagination/date/status filters; finalized in Part 8 | Authorized `AuditEvent` collection |
 
@@ -124,3 +128,11 @@ responses. Generic plan/status mutations cannot bypass the managed domain servic
 Actual creation/submission remains blocked pending Part 7; prepared claims are
 not submitted claims. See the Part 5 contract table for required business facts
 in EHR, billing and insurance responses.
+
+Part 6 adds `use_graph: true` to new managed claims. Such claims require current
+successful graph relationship/dependency/history receipts before reaching approval.
+The requirement cannot be removed by intake updates; old query metadata remains
+traceable after explicit read refreshes. Invalid/incomplete/unavailable graph data
+never becomes an empty success or claim approval. Native NebulaGraph schemas and
+ingestion remain with the graph owner. See the Part 6 facade contract for IDs,
+result references, item shapes and safe `GRAPH_*` error codes.

@@ -170,4 +170,6 @@ def capture(cursor, call, arguments, result):
     else:
         cursor.execute("SELECT operation FROM workflow_case_evidence WHERE workflow_id=%s", (workflow_id,))
         if set(CLAIM_READS) <= {row["operation"] for row in cursor.fetchall()}:
-            set_phase(cursor, workflow_id, "awaiting_approval")
+            from backend.services.graph_service import evidence_ready
+            if not data.get("use_graph") or evidence_ready(cursor, workflow_id):
+                set_phase(cursor, workflow_id, "awaiting_approval")

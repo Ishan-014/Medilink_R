@@ -42,6 +42,7 @@ class ClaimData(Contract):
 class ClaimStart(ClaimData):
     patient_profile_id: UUID
     request: str = Field(default="Prepare insurance claim", min_length=1, max_length=10000)
+    use_graph: bool = Field(default=False, strict=True)
 
 
 class ClaimUpdate(ClaimData):

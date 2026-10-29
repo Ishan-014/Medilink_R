@@ -67,7 +67,8 @@ def update_claim(workflow_id: UUID, body: ClaimUpdate, request: Request, user: d
 async def advance(workflow_id: UUID, body: AdvanceInput, request: Request,
                   user: dict = Depends(require_roles(Role.DOCTOR, Role.ADMIN)), settings: Settings = Depends(settings_for_request),
                   client: HospitalClient = Depends(hospital_client)):
-    data = await service.advance(settings, client, str(workflow_id), user, body.expected_version)
+    data = await service.advance(settings, client, str(workflow_id), user, body.expected_version,
+                                 graph_client=request.app.state.graph_client)
     return SuccessResponse(data=data, request_id=request.state.request_id)
 
 
