@@ -28,12 +28,16 @@ from datetime import datetime, timezone, timedelta
 from .models import StageToken, LoginStage, LoginResult
 from .credentials import verify_stage_token, issue_stage_token
 
-CARD_SIGNING_SECRET = os.environ.get("MEDILINK_CARD_SECRET", "dev-card-secret-change-me").encode()
+# Signing configuration is read when a card is used, not at module import.
 CARD_VALIDITY_DAYS = 365   # how long a printed card stays valid before reissue
 
 
 def _sign(payload_bytes: bytes) -> str:
-    return hmac.new(CARD_SIGNING_SECRET, payload_bytes, hashlib.sha256).hexdigest()
+    from fastapi import HTTPException
+    secret = os.environ.get("MEDILINK_CARD_SECRET", "")
+    if len(secret) < 32 or secret.startswith(("dev-", "replace-")):
+        raise HTTPException(503, "Configure a random MEDILINK_CARD_SECRET of at least 32 characters")
+    return hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
 
 
 def _encode_card_payload(employee_id: str) -> str:

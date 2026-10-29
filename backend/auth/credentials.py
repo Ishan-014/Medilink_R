@@ -6,16 +6,17 @@ On success, issues a short-lived JWT "stage token" that proves the caller
 passed this layer -- it must be presented to layer 2 (ID card) next.
 """
 
-import os
 import uuid
 import jwt
 from datetime import datetime, timedelta, timezone
-from pwdlib import PasswordHash
-from .models import Employee, StageToken, LoginStage, LoginResult
+from backend.auth.security import PASSWORD_HASH, STAFF_ROLES, signing_key
+from backend.auth.security import verify_password as check_password
+from backend.core.config import get_settings
+from .models import StageToken, LoginStage, LoginResult
 
-password_hash = PasswordHash.recommended()
+password_hash = PASSWORD_HASH
 # In production load this from a secrets manager / env var, never hardcode.
-JWT_SECRET = os.environ.get("MEDILINK_JWT_SECRET", "dev-secret-change-me")
+JWT_SECRET = get_settings().jwt_secret
 JWT_ALGORITHM = "HS256"
 STAGE_TOKEN_TTL_MINUTES = 5   # each stage token is short-lived on purpose
 
@@ -28,7 +29,7 @@ def hash_password(plain_password: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return password_hash.verify(plain_password, hashed_password)
+    return check_password(plain_password, hashed_password)
 
 
 # ---------------------------------------------------------------------------
@@ -37,18 +38,20 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def issue_stage_token(employee_id: str, stage: LoginStage, nonce: str) -> str:
     payload = {
         "employee_id": employee_id,
+        "token_type": "stage",
         "stage": stage.value,
         "nonce": nonce,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=STAGE_TOKEN_TTL_MINUTES),
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, signing_key(), algorithm=JWT_ALGORITHM)
 
 
 def verify_stage_token(token: str, expected_stage: LoginStage) -> StageToken:
     """Raises jwt exceptions on failure -- caller should catch and return a
     clean LoginResult(success=False, ...) rather than leaking stack traces."""
-    payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    if payload["stage"] != expected_stage.value:
+    payload = jwt.decode(token, signing_key(), algorithms=[JWT_ALGORITHM],
+                         options={"require": ["exp", "employee_id", "stage", "nonce", "token_type"]})
+    if payload["token_type"] != "stage" or payload["stage"] != expected_stage.value:
         raise ValueError(f"expected stage {expected_stage.value}, got {payload['stage']}")
     return StageToken(employee_id=payload["employee_id"], stage=payload["stage"], nonce=payload["nonce"])
 
@@ -67,6 +70,9 @@ def login_with_credentials(username: str, password: str, employee_lookup) -> Log
         return LoginResult(success=False, stage=LoginStage.STAGE1_CREDENTIALS,
                             message="Invalid username or password.")
 
+    if employee.role not in STAFF_ROLES:
+        return LoginResult(success=False, stage=LoginStage.STAGE1_CREDENTIALS,
+                           message="Patients must use /api/auth/login.")
     nonce = str(uuid.uuid4())
     token = issue_stage_token(employee.employee_id, LoginStage.STAGE2_ID_CARD, nonce)
     return LoginResult(

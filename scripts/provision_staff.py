@@ -52,7 +52,7 @@ def main():
         raise SystemExit("Active MediLink user not found.")
 
     user_id, full_name, email, role = user
-    if role not in {"doctor", "receptionist"}:
+    if role not in {"doctor", "receptionist", "admin", "auditor"}:
         raise SystemExit(f"Unsupported staff role: {role}")
 
     assets = Path(__file__).resolve().parents[1] / "assets"
@@ -60,13 +60,11 @@ def main():
 
     safe_id = str(user_id)
     qr_path = assets / f"{safe_id}_qr.png"
-    card_path = assets / f"{safe_id}_id_card.png"
 
-    card_string = generate_employee_qr(safe_id, str(qr_path))
+    generate_employee_qr(safe_id, str(qr_path))
     print(f"Provisioned: {full_name} <{email}> ({role})")
     print(f"user_id: {safe_id}")
     print(f"QR: {qr_path}")
-    print(f"Signed QR payload: {card_string}")
     print("Printable card generation can reuse generate_demo_card.py with these identity values.")
 
 

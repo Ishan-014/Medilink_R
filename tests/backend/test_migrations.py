@@ -38,16 +38,16 @@ def database():
 
 
 def test_migration_applies_once_and_status_does_not_change_schema(database):
-    expected_name = "0001_workflow_foundation.sql"
-    assert migrate(database, status_only=True) == [(expected_name, "pending")]
+    names = [p.name for p in migration_files()]
+    assert migrate(database, status_only=True) == [(name, "pending") for name in names]
     with database.cursor() as cursor:
         cursor.execute("SELECT to_regclass('public.schema_migrations')")
         assert cursor.fetchone()[0] is None
-    assert migrate(database) == [(expected_name, "applied")]
-    assert migrate(database) == [(expected_name, "applied")]
+    assert migrate(database) == [(name, "applied") for name in names]
+    assert migrate(database) == [(name, "applied") for name in names]
     with database.cursor() as cursor:
         cursor.execute("SELECT count(*) FROM schema_migrations")
-        assert cursor.fetchone()[0] == 1
+        assert cursor.fetchone()[0] == len(names)
 
 
 def test_applied_migration_cannot_be_edited(database, tmp_path):
@@ -126,13 +126,47 @@ def test_workflow_foreign_keys_and_constraints(database):
 
 def test_existing_patient_and_user_tables_are_untouched(database):
     with database.cursor() as cursor:
-        cursor.execute("CREATE TABLE users (legacy_marker TEXT)")
-        cursor.execute("INSERT INTO users VALUES ('existing-user')")
+        cursor.execute("""CREATE TABLE users (user_id SERIAL PRIMARY KEY, full_name TEXT, email TEXT UNIQUE,
+            password_hash TEXT, role TEXT CHECK (role IN ('doctor','receptionist')),
+            is_active BOOLEAN DEFAULT TRUE, legacy_marker TEXT)""")
+        cursor.execute("""INSERT INTO users (full_name,email,password_hash,role,legacy_marker)
+            VALUES ('Existing doctor','existing@example.com','existing-hash','doctor','existing-user')""")
         cursor.execute("CREATE TABLE patients (legacy_marker TEXT)")
         cursor.execute("INSERT INTO patients VALUES ('existing-patient')")
     migrate(database)
     with database.cursor() as cursor:
-        cursor.execute("SELECT * FROM users")
+        cursor.execute("SELECT legacy_marker FROM users")
         assert cursor.fetchall() == [("existing-user",)]
         cursor.execute("SELECT * FROM patients")
         assert cursor.fetchall() == [("existing-patient",)]
+        # The older role-only restriction was expanded without changing accounts.
+        cursor.execute("""INSERT INTO users (full_name,email,password_hash,role)
+            VALUES ('Patient','new@example.com','new-hash','patient')""")
+
+
+def test_upgrade_from_part1_retains_workflow_rows(database, tmp_path):
+    name = "0001_workflow_foundation.sql"
+    (tmp_path / name).write_bytes((MIGRATIONS_DIR / name).read_bytes())
+    migrate(database, directory=tmp_path)
+    workflow_id = str(uuid4())
+    with database.cursor() as cursor:
+        cursor.execute("""INSERT INTO workflow_runs (id,owner_user_id,workflow_type,request)
+            VALUES (%s,'existing-owner','onboarding','Existing request')""", (workflow_id,))
+    migrate(database)
+    with database.cursor() as cursor:
+        cursor.execute("SELECT owner_user_id,status,version FROM workflow_runs WHERE id = %s", (workflow_id,))
+        assert cursor.fetchone() == ("existing-owner", "CREATED", 0)
+
+
+def test_incompatible_legacy_identity_schema_fails_without_partial_migration(database):
+    with database.cursor() as cursor:
+        cursor.execute("CREATE TABLE users (legacy_marker TEXT)")
+        cursor.execute("INSERT INTO users VALUES ('preserve-me')")
+        cursor.execute("SAVEPOINT before_upgrade")
+        with pytest.raises(psycopg2.errors.RaiseException):
+            migrate(database)
+        cursor.execute("ROLLBACK TO SAVEPOINT before_upgrade")
+        cursor.execute("SELECT legacy_marker FROM users")
+        assert cursor.fetchall() == [("preserve-me",)]
+        cursor.execute("SELECT to_regclass('public.workflow_runs')")
+        assert cursor.fetchone()[0] is None

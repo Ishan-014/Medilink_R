@@ -1,3 +1,5 @@
 -r requirements-foundation.txt
 pytest>=8,<10
 httpx>=0.27,<1
+# Exercise the existing staff HTTP contract without loading camera/AI models.
+pypdf>=5,<7

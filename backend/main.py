@@ -8,28 +8,22 @@ from fastapi import (
     File
 )
 
-from fastapi.security import (
-    HTTPBearer,
-    HTTPAuthorizationCredentials
-)
-
 from pydantic import BaseModel
 
 from typing import Optional, List
-from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
-import jwt
 import re
 
-from pwdlib import PasswordHash
 from pypdf import PdfReader
 
 from backend.application import create_app
 from backend.db.connection import connect
 
-from backend.auth.router import router as auth_router
-from backend.auth.credentials import JWT_SECRET, JWT_ALGORITHM
+from backend.auth.security import current_identity, settings_for_request, require_roles
+from backend.api.schemas import Role
+from backend.api.auth import PasswordInput, password_login
+from backend.core.config import Settings
 from backend.agents.graph import run_conversation
 # ==========================================================
 # FASTAPI APPLICATION
@@ -37,28 +31,6 @@ from backend.agents.graph import run_conversation
 
 app = create_app()
 
-# Three-layer staff authentication: credentials -> ID card -> face.
-app.include_router(auth_router)
-
-
-# ==========================================================
-# PASSWORD HASHING
-# ==========================================================
-
-password_hash = PasswordHash.recommended()
-
-
-# ==========================================================
-# JWT CONFIGURATION
-# ==========================================================
-
-SECRET_KEY = JWT_SECRET
-
-ALGORITHM = "HS256"
-
-TOKEN_EXPIRE_MINUTES = 60
-
-security = HTTPBearer()
 
 
 # ==========================================================
@@ -112,10 +84,8 @@ def normalize_patient_record(patient):
 # REQUEST MODELS
 # ==========================================================
 
-class LoginRequest(BaseModel):
-
-    email: str
-    password: str
+class LoginRequest(PasswordInput):
+    pass
 
 
 class ChatRequest(BaseModel):
@@ -124,76 +94,9 @@ class ChatRequest(BaseModel):
     history: List[dict] = []
 
 
-# ==========================================================
-# JWT TOKEN CREATION
-# ==========================================================
-
-def create_access_token(
-    user_id,
-    email,
-    role
-):
-
-    expiry = (
-        datetime.now(timezone.utc)
-        + timedelta(
-            minutes=TOKEN_EXPIRE_MINUTES
-        )
-    )
-
-    payload = {
-
-        "user_id": user_id,
-
-        "email": email,
-
-        "role": role,
-
-        "exp": expiry
-    }
-
-    return jwt.encode(
-        payload,
-        SECRET_KEY,
-        algorithm=ALGORITHM
-    )
-
-
-# ==========================================================
-# READ CURRENT USER FROM JWT
-# ==========================================================
-
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-):
-    token = credentials.credentials
-
-    try:
-        payload = jwt.decode(
-            token,
-            JWT_SECRET,
-            algorithms=[JWT_ALGORITHM]
-        )
-
-        return {
-            "user_id": payload["user_id"],
-            "employee_id": payload.get("employee_id", payload["user_id"]),
-            "email": payload["email"],
-            "role": payload["role"],
-            "auth_level": payload.get("auth_level", 1),
-        }
-
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=401,
-            detail="Token expired"
-        )
-
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token"
-        )
+# All protected legacy routes now share the live identity and auth-stage checks.
+def get_current_user(current_user=Depends(current_identity)):
+    return current_user
 
 
 # ==========================================================
@@ -252,110 +155,12 @@ def home():
 # ==========================================================
 
 @app.post("/login")
-def login(
-    data: LoginRequest
-):
-
-    conn = get_db_connection()
-
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        SELECT
-            user_id,
-            full_name,
-            email,
-            password_hash,
-            role,
-            is_active
-
-        FROM users
-
-        WHERE email = %s
-        """,
-
-        (data.email,)
-    )
-
-    user = cursor.fetchone()
-
-    cursor.close()
-    conn.close()
-
-
-    if user is None:
-
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid email or password"
-        )
-
-
-    user_id = user[0]
-
-    full_name = user[1]
-
-    email = user[2]
-
-    stored_password_hash = user[3]
-
-    role = user[4]
-
-    is_active = user[5]
-
-
-    if not is_active:
-
-        raise HTTPException(
-            status_code=403,
-            detail="User account disabled"
-        )
-
-
-    if not password_hash.verify(
-        data.password,
-        stored_password_hash
-    ):
-
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid email or password"
-        )
-
-
-    access_token = create_access_token(
-        user_id,
-        email,
-        role
-    )
-
-
+def login(data: LoginRequest, settings: Settings = Depends(settings_for_request)):
+    # Retain the legacy response shape, but never bypass staff QR/face checks.
+    result = password_login(data, settings)
     return {
-
-        "message":
-            "Login successful",
-
-        "access_token":
-            access_token,
-
-        "token_type":
-            "bearer",
-
-        "user": {
-
-            "user_id":
-                user_id,
-
-            "full_name":
-                full_name,
-
-            "email":
-                email,
-
-            "role":
-                role
-        }
+        "message": "Login successful", "access_token": result.access_token,
+        "token_type": result.token_type, "user": result.user.model_dump(),
     }
 
 
@@ -596,8 +401,8 @@ def receptionist_patient_detail(
     cursor.execute(
         """
         SELECT *
-        FROM patients
-        WHERE id = %s
+        FROM receptionist_patient_view
+        WHERE patient_id = %s
         LIMIT 1
         """,
         (patient_id,)
@@ -844,7 +649,7 @@ def document_looks_clinical(
 @app.post("/chat")
 def chatbot(
     data: ChatRequest,
-    current_user=Depends(get_current_user)
+    current_user=Depends(doctor_only)
 ):
     message = (data.message or "").strip()
 
@@ -852,12 +657,6 @@ def chatbot(
         raise HTTPException(
             status_code=400,
             detail="Message cannot be empty",
-        )
-
-    if current_user["role"] not in {"doctor", "receptionist"}:
-        raise HTTPException(
-            status_code=403,
-            detail="Unsupported role",
         )
 
     try:
@@ -882,7 +681,7 @@ def chatbot(
 @app.post("/chat/upload")
 async def upload_chat_document(
     file: UploadFile = File(...),
-    current_user=Depends(get_current_user)
+    current_user=Depends(require_roles(Role.DOCTOR, Role.RECEPTIONIST))
 ):
 
     filename = (

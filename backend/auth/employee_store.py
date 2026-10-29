@@ -6,26 +6,14 @@ from the same PostgreSQL users table used by the application backend.
 from dotenv import load_dotenv
 
 load_dotenv()
-import os
 from typing import Optional
-
-import psycopg2
 
 from .models import Employee
 
 
 def _get_conn():
-    kwargs = {"dbname": os.environ.get("MEDILINK_DB_NAME", "medilink")}
-    for env_name, key in [
-        ("MEDILINK_DB_HOST", "host"),
-        ("MEDILINK_DB_PORT", "port"),
-        ("MEDILINK_DB_USER", "user"),
-        ("MEDILINK_DB_PASSWORD", "password"),
-    ]:
-        value = os.environ.get(env_name)
-        if value:
-            kwargs[key] = value
-    return psycopg2.connect(**kwargs)
+    from backend.db.connection import connection
+    return connection()
 
 
 def _row_to_employee(row) -> Optional[Employee]:
@@ -48,9 +36,9 @@ def get_employee_by_username(username: str) -> Optional[Employee]:
                 """
                 SELECT user_id, full_name, email, password_hash, role
                 FROM users
-                WHERE email = %s AND is_active = TRUE
+                WHERE lower(email) = %s AND is_active = TRUE
                 """,
-                (username.strip(),),
+                (username.strip().lower(),),
             )
             return _row_to_employee(cursor.fetchone())
 

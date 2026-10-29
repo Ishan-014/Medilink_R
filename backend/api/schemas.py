@@ -95,6 +95,7 @@ class WorkflowRun(Contract):
     status: WorkflowStatus
     created_at: datetime
     updated_at: datetime
+    version: int = Field(default=0, ge=0)
     steps: list[WorkflowStep] = Field(default_factory=list)
 
 

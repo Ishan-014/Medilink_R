@@ -7,6 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.errors import install_error_handlers
 from backend.api.health import router as health_router
+from backend.api.auth import router as auth_router
+from backend.api.workflows import router as workflow_router
+from backend.auth.router import router as staff_auth_router
 from backend.core.config import Settings, get_settings
 
 
@@ -30,4 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     install_error_handlers(app)
     app.include_router(health_router)
+    app.include_router(auth_router)
+    app.include_router(workflow_router)
+    app.include_router(staff_auth_router)
     return app

@@ -6,8 +6,7 @@ Shared data models for the 3-layer MediLink auth pipeline:
   Layer 2: ID card (QR code, HMAC-signed)
   Layer 3: facial recognition (face embedding match)
 
-RBAC is intentionally NOT enforced yet -- `role` is stored but unused.
-See router.py bottom for the TODO marking where to plug it in.
+Roles are enforced by backend.auth.security against the current database identity.
 """
 
 from pydantic import BaseModel
@@ -20,7 +19,7 @@ class Employee(BaseModel):
     username: str
     hashed_password: str
     full_name: str
-    role: Optional[str] = "unassigned"     # RBAC placeholder -- not enforced yet
+    role: Optional[str] = "unassigned"
     face_encoding_path: Optional[str] = None  # path to stored reference embedding
 
 
