@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Optional
 
 import psycopg2
 from dotenv import load_dotenv
-from openai import OpenAI
 
 load_dotenv()
 
@@ -205,6 +204,7 @@ def generate_clinical_brief(patient_id: str, focus: Optional[str] = None) -> Opt
             "context": patient_context,
         }
 
+    from openai import OpenAI
     client = OpenAI(api_key=api_key)
     focus_text = focus.strip() if focus and str(focus).strip() else "general overview"
 
@@ -243,39 +243,8 @@ def generate_clinical_brief(patient_id: str, focus: Optional[str] = None) -> Opt
 
 
 def _update_patient_field(patient_id: str, field_name: str, value: Any) -> Optional[Dict[str, Any]]:
-    """Safely update a single patient field in PostgreSQL and return a consistent doctor-facing payload."""
-    if patient_id is None:
-        return None
-
-    cleaned_patient_id = str(patient_id).strip()
-    if not cleaned_patient_id:
-        return None
-
-    if value is None:
-        value = ""
-
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                f"""
-                UPDATE patients
-                SET {field_name} = %s
-                WHERE id = %s
-                RETURNING *
-                """,
-                (value, cleaned_patient_id),
-            )
-            row = cursor.fetchone()
-            if row is None:
-                return None
-            updated = _row_to_dict(cursor, row)
-            conn.commit()
-
-            return {
-                "patient_id": updated.get("id"),
-                "name": updated.get("name"),
-                field_name: updated.get(field_name),
-            }
+    """Legacy direct writes cannot bypass the managed workflow approval gate."""
+    raise PermissionError("Clinical changes require an approved managed workflow")
 
 
 def update_patient_conditions(patient_id: str, conditions: str) -> Optional[Dict[str, Any]]:

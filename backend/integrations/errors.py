@@ -1,6 +1,9 @@
 from fastapi import HTTPException
 
 ERRORS = {
+    "APPROVAL_REQUIRED": (403, "A valid action approval is required"),
+    "APPROVAL_STALE": (409, "Approval expired or its action evidence changed"),
+    "ACTION_SIGNING_NOT_CONFIGURED": (503, "Approved-action signing is not configured"),
     "MCP_NOT_CONFIGURED": (503, "Hospital integration is not configured"),
     "MCP_CONFIG_INVALID": (503, "Hospital integration configuration is invalid"),
     "MCP_UNAVAILABLE": (503, "Hospital integration is unavailable"),
@@ -10,7 +13,7 @@ ERRORS = {
     "MCP_INPUT_INVALID": (422, "Arguments do not match the hospital capability schema"),
     "MCP_OUTPUT_INVALID": (502, "Hospital capability returned invalid data"),
     "MCP_REMOTE_ERROR": (502, "Hospital capability reported a failure"),
-    "MCP_WRITE_BLOCKED": (403, "Write capabilities require the future authoritative approval gate"),
+    "MCP_WRITE_BLOCKED": (403, "Write capability is outside the approved managed workflows"),
 }
 
 

@@ -183,6 +183,13 @@ def cancel_workflow(settings, workflow_id, user, expected_version):
             check_version(row, expected_version)
             if "CANCELLED" not in TRANSITIONS[row["status"]]:
                 raise HTTPException(409, "Terminal workflows cannot be cancelled")
+            cursor.execute("SELECT 1 FROM tool_calls WHERE workflow_id=%s AND approval_id IS NOT NULL AND status='pending' LIMIT 1", (workflow_id,))
+            if cursor.fetchone():
+                raise HTTPException(409, "An external write is in progress; wait for its recorded outcome")
+            cursor.execute("UPDATE approvals SET status='invalidated' WHERE workflow_id=%s AND status IN ('pending','approved') RETURNING id", (workflow_id,))
+            from backend.services.approval_service import event
+            for approval in cursor.fetchall():
+                event(cursor, approval["id"], user["user_id"], "invalidated", "Workflow cancelled before execution")
             cursor.execute("""
                 UPDATE workflow_runs SET status = 'CANCELLED', version = version + 1,
                     updated_at = clock_timestamp() WHERE id = %s RETURNING *

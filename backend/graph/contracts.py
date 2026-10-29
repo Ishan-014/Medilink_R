@@ -71,6 +71,7 @@ class GraphQueryInput(Contract):
 
 
 class GraphQueryRecord(Contract):
+    risk: Literal["low"]
     id: UUID
     workflow_id: UUID
     workflow_step_id: UUID

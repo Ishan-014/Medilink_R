@@ -75,7 +75,7 @@ def prepare(settings, workflow_id, user, body):
                 (id,workflow_id,workflow_step_id,patient_profile_id,actor_user_id,operation,request_fingerprint)
                 VALUES (%s,%s,%s,%s,%s,%s,%s)""", (str(request.query_id), workflow_id, str(body.step_id), str(body.patient_profile_id),
                     user["user_id"], body.operation, fingerprint))
-            cursor.execute("UPDATE workflow_steps SET status='EXECUTING',updated_at=clock_timestamp() WHERE id=%s", (str(body.step_id),))
+            cursor.execute("UPDATE workflow_steps SET status='EXECUTING',risk='low',updated_at=clock_timestamp() WHERE id=%s", (str(body.step_id),))
             cursor.execute("UPDATE workflow_runs SET version=version+1,updated_at=clock_timestamp() WHERE id=%s", (workflow_id,))
             return request
 
@@ -113,6 +113,8 @@ def finalize(settings, request, duration_ms, *, result=None, error=None):
                         cursor.execute("SELECT operation FROM workflow_case_evidence WHERE workflow_id=%s", (workflow_id,))
                         if set(CLAIM_READS) <= {item["operation"] for item in cursor.fetchall()}:
                             set_phase(cursor, workflow_id, "awaiting_approval")
+                            from backend.services.approval_service import enqueue
+                            enqueue(cursor, workflow_id, row["actor_user_id"], settings)
             return record(row)
 
 

@@ -1,4 +1,4 @@
-"""Authorize, persist, dispatch and finalize MCP reads through one backend boundary."""
+"""Authorize reads and single-use approved writes through one backend boundary."""
 
 import asyncio
 import hashlib
@@ -19,6 +19,9 @@ from backend.integrations.config import configured_server
 from backend.integrations.errors import IntegrationError
 from backend.integrations.policy import split_operation, WRITE_TOOLS
 from backend.services.workflow_service import load as load_workflow, check_version
+from backend.risk.policy import classify, ENABLED_WRITES
+from backend.risk.context import action_key, execution_context
+from backend.services import approval_service
 
 
 class ToolCallInput(Contract):
@@ -41,6 +44,9 @@ class ToolCallRecord(Contract):
     duration_ms: int | None
     error_code: str | None
     result_reference: str | None
+    risk: Literal["low", "medium", "high"]
+    approval_id: UUID | None
+    action_reservation_id: UUID | None
 
 
 class ToolCallOutput(Contract):
@@ -59,14 +65,28 @@ def prepare(settings, workflow_id, user, body):
     if selection is None:
         raise HTTPException(403, "Hospital capability is not allowed")
     server_name, tool_name = selection
-    if tool_name in WRITE_TOOLS.get(server_name, set()):
+    is_write = tool_name in WRITE_TOOLS.get(server_name, set())
+    if is_write and body.operation not in ENABLED_WRITES:
         raise IntegrationError("MCP_WRITE_BLOCKED")
-    server = configured_server(settings, server_name)
+    risk = classify(body.operation)
     payload = checked_json(body.arguments, 65536, "MCP_INPUT_INVALID")
     with connection(settings) as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             workflow = load_workflow(cursor, workflow_id, user, lock=True)
             check_version(workflow, body.expected_version)
+            approval = None
+            context = None
+            reservation_id = None
+            if is_write:
+                if workflow["managed_kind"] != ENABLED_WRITES[body.operation]:
+                    raise IntegrationError("MCP_WRITE_BLOCKED")
+                approval, canonical = approval_service.authorized(cursor, workflow, body.step_id, settings)
+                if body.arguments != canonical:
+                    raise HTTPException(409, "Arguments differ from the approved action")
+                from backend.services.business_service import assert_no_unresolved_write
+                assert_no_unresolved_write(cursor, workflow["subject_user_id"], body.operation)
+                action_key(settings)
+            server = configured_server(settings, server_name)
             if workflow["status"] != "EXECUTING":
                 raise HTTPException(409, "Workflow must be EXECUTING before calling hospital tools")
             if workflow["managed_kind"]:
@@ -90,14 +110,29 @@ def prepare(settings, workflow_id, user, body):
             if cursor.fetchone():
                 raise HTTPException(409, "Attached documents must finish extraction first")
             call_id = str(uuid4())
+            digest = hashlib.sha256(payload).hexdigest()
+            if is_write:
+                reservation_id = str(uuid4())
+                key = f"approved-step:{body.step_id}"
+                cursor.execute("""INSERT INTO workflow_action_keys (id,workflow_id,action,idempotency_key,fingerprint)
+                    VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING id""",
+                    (reservation_id, workflow_id, body.operation, key, digest))
+                if not cursor.fetchone():
+                    raise HTTPException(409, "External action has already been reserved; reconcile its recorded outcome")
+                context = execution_context(settings, approval, call_id, user["user_id"], body.operation,
+                                            digest, key, server.timeout_seconds)
             cursor.execute("""
-                INSERT INTO tool_calls (id, workflow_id, workflow_step_id, actor_user_id, server, tool, request_fingerprint)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)
+                INSERT INTO tool_calls (id, workflow_id, workflow_step_id, actor_user_id, server, tool,
+                    request_fingerprint,risk,approval_id,action_reservation_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (call_id, workflow_id, str(body.step_id), user["user_id"], server_name, tool_name,
-                  hashlib.sha256(payload).hexdigest()))
+                  digest, risk, str(approval["id"]) if approval else None, reservation_id))
+            if approval:
+                approval_service.consume(cursor, approval, call_id, user["user_id"])
+            cursor.execute("UPDATE workflow_steps SET risk=%s WHERE id=%s", (risk,str(body.step_id)))
             cursor.execute("UPDATE workflow_steps SET status = 'EXECUTING', updated_at = clock_timestamp() WHERE id = %s", (str(body.step_id),))
             cursor.execute("UPDATE workflow_runs SET version = version + 1, updated_at = clock_timestamp() WHERE id = %s", (workflow_id,))
-    return call_id, server, tool_name
+    return call_id, server, tool_name, context
 
 
 def finalize(settings, call_id, duration_ms, error: IntegrationError | None = None, *, arguments=None, result=None):
@@ -108,7 +143,21 @@ def finalize(settings, call_id, duration_ms, error: IntegrationError | None = No
             # Same lock order as prepare/cancel: workflow, then the call/step.
             cursor.execute("SELECT status FROM workflow_runs WHERE id = %s FOR UPDATE", (str(workflow_id),))
             workflow_status = cursor.fetchone()["status"]
-            uncertain = error is not None and error.dispatched and error.error_code in {"MCP_TIMEOUT", "MCP_UNAVAILABLE"}
+            cursor.execute("SELECT * FROM tool_calls WHERE id=%s FOR UPDATE", (call_id,))
+            pending = cursor.fetchone()
+            is_write = pending["tool"] in WRITE_TOOLS.get(pending["server"], set())
+            if is_write:
+                if not pending["approval_id"] or not pending["action_reservation_id"]:
+                    raise IntegrationError("MCP_WRITE_BLOCKED")
+                cursor.execute("""SELECT 1 FROM approvals a JOIN workflow_action_keys k ON k.id=%s
+                    WHERE a.id=%s AND a.status='consumed' AND a.consumed_call_id=%s
+                    AND a.workflow_step_id=%s AND a.operation=%s AND k.workflow_id=%s
+                    AND k.action=a.operation AND k.fingerprint=%s AND k.status='pending'""",
+                    (str(pending["action_reservation_id"]),str(pending["approval_id"]),call_id,
+                     str(pending["workflow_step_id"]), f"{pending['server']}.{pending['tool']}", str(workflow_id), pending["request_fingerprint"]))
+                if not cursor.fetchone():
+                    raise IntegrationError("MCP_WRITE_BLOCKED")
+            uncertain = error is not None and error.dispatched and (is_write or error.error_code in {"MCP_TIMEOUT", "MCP_UNAVAILABLE"})
             status = "succeeded" if error is None else ("uncertain" if uncertain else "failed")
             reference = f"tool-call:{call_id}" if error is None else None
             cursor.execute("""
@@ -118,6 +167,9 @@ def finalize(settings, call_id, duration_ms, error: IntegrationError | None = No
             row = cursor.fetchone()
             if row is None:
                 raise HTTPException(409, "Tool call has already been finalized")
+            if is_write:
+                cursor.execute("""UPDATE workflow_action_keys SET status=%s,result_reference=%s,updated_at=clock_timestamp()
+                    WHERE id=%s""", (status,reference,str(row["action_reservation_id"])))
             cursor.execute("""UPDATE workflow_steps SET status = %s, result_reference = %s,
                 updated_at = clock_timestamp() WHERE id = %s""",
                            ("COMPLETED" if error is None else "FAILED", reference, str(row["workflow_step_id"])))
@@ -127,7 +179,7 @@ def finalize(settings, call_id, duration_ms, error: IntegrationError | None = No
             if workflow_status == "EXECUTING":
                 if error is None:
                     from backend.services.business_evidence import capture
-                    capture(cursor, row, arguments, result)
+                    capture(cursor, row, arguments, result, settings=settings)
                 else:
                     from backend.services.business_service import close_case
                     close_case(cursor, str(workflow_id), "failed")
@@ -135,10 +187,10 @@ def finalize(settings, call_id, duration_ms, error: IntegrationError | None = No
 
 
 async def execute(settings, client, workflow_id, user, body):
-    call_id, server, tool = await run_in_threadpool(prepare, settings, workflow_id, user, body)
+    call_id, server, tool, context = await run_in_threadpool(prepare, settings, workflow_id, user, body)
     start = time.monotonic()
     try:
-        result = await client.call(server, tool, body.arguments)
+        result = await client.call(server, tool, body.arguments, **({"context": context} if context else {}))
     except IntegrationError as exc:
         await run_in_threadpool(finalize, settings, call_id, int((time.monotonic() - start) * 1000), exc)
         raise

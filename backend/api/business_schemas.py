@@ -54,7 +54,7 @@ class CaseStatus(Contract):
     kind: Literal["onboarding", "insurance_claim"]
     subject_user_id: str
     entity_id: UUID
-    phase: Literal["waiting_data", "collecting", "awaiting_approval", "confirmed", "failed", "cancelled"]
+    phase: Literal["waiting_data", "collecting", "awaiting_approval", "confirmed", "failed", "cancelled", "rejected"]
     missing_fields: list[str]
     next_action: str | None
 
@@ -69,7 +69,7 @@ class PatientProfile(Contract):
     phone: str | None
     external_patient_id: str | None
     confirmation_call_id: UUID | None
-    status: Literal["draft", "active", "cancelled", "failed"]
+    status: Literal["draft", "active", "cancelled", "failed", "rejected"]
     created_at: datetime
     updated_at: datetime
 
@@ -83,7 +83,7 @@ class ClaimRecord(Contract):
     procedure_code: str | None
     amount: Decimal | None
     currency: str
-    status: Literal["waiting_for_data", "preparing", "prepared", "submitted", "failed", "cancelled"]
+    status: Literal["waiting_for_data", "preparing", "prepared", "submitted", "failed", "cancelled", "rejected"]
     external_claim_id: str | None
     submission_call_id: UUID | None
     created_at: datetime

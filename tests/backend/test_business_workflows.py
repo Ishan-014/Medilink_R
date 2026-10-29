@@ -339,7 +339,7 @@ def test_cancelling_in_flight_onboarding_cannot_activate_profile(business):
 
 
 def trusted_pending_write(env, case, operation):
-    """Simulate a future authorized executor callback, never a public bypass."""
+    """Seed an unapproved callback to verify that finalization cannot bypass review."""
     workflow_id = case["workflow"]["id"]
     with connection(env.settings) as conn:
         from psycopg2.extras import RealDictCursor
@@ -357,29 +357,31 @@ def trusted_pending_write(env, case, operation):
     return call_id, arguments
 
 
-def test_internal_confirmed_creation_receipt_updates_patient_atomically(business):
+def test_unapproved_creation_receipt_cannot_activate_patient(business):
     env, peer = business
     peer.matches = []
     case = advance(env, start_onboarding(env).json()["data"]).json()["data"]
     assert advance(env, case).status_code == 403  # The HTTP write gate remains closed.
     call_id, arguments = trusted_pending_write(env, case, "ehr.create_patient")
-    receipt = finalize(env.settings, call_id, 1, arguments=arguments, result=PATIENT)
-    assert receipt.status == "succeeded"
+    from backend.integrations.errors import IntegrationError
+    with pytest.raises(IntegrationError, match="403"):
+        finalize(env.settings, call_id, 1, arguments=arguments, result=PATIENT)
     profile = env.client.get(f"/api/patients/{case['entity_id']}", headers=env.headers()).json()["data"]
-    assert profile["status"] == "active" and profile["confirmation_call_id"] == call_id
-    assert env.client.get(f"/api/workflows/{case['workflow']['id']}/case", headers=env.headers()).json()["data"]["phase"] == "confirmed"
+    assert profile["status"] == "draft" and profile["confirmation_call_id"] is None
 
 
-def test_internal_submission_receipt_is_required_before_claim_is_submitted(business):
+def test_unapproved_submission_receipt_cannot_submit_claim(business):
     env, _ = business
     case = prepare_claim(env, start_claim(env, confirmed_profile(env)).json()["data"])
     assert advance(env, case).status_code == 403
     call_id, arguments = trusted_pending_write(env, case, "insurance.submit_claim")
-    finalize(env.settings, call_id, 1, arguments=arguments, result={**arguments, "covered": True,
-        "claim_id": "CLAIM-CONFIRMED-SYNTHETIC", "status": "submitted"})
+    from backend.integrations.errors import IntegrationError
+    with pytest.raises(IntegrationError, match="403"):
+        finalize(env.settings, call_id, 1, arguments=arguments, result={**arguments, "covered": True,
+            "claim_id": "CLAIM-CONFIRMED-SYNTHETIC", "status": "submitted"})
     claim = env.client.get(f"/api/claims/{case['entity_id']}", headers=env.headers()).json()["data"]
-    assert claim["status"] == "submitted" and claim["submission_call_id"] == call_id
-    assert claim["external_claim_id"] == "CLAIM-CONFIRMED-SYNTHETIC"
+    assert claim["status"] == "prepared" and claim["submission_call_id"] is None
+    assert claim["external_claim_id"] is None
 
 
 def test_onboarding_documents_pause_until_extraction_is_complete(business):

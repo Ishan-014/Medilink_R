@@ -50,7 +50,7 @@ def status(cursor, workflow, case):
     steps = cursor.fetchall()
     next_action = None if any(s["status"] == "EXECUTING" for s in steps) else next(
         (s["action"] for s in steps if s["status"] == "CREATED"), None)
-    if case["phase"] in {"confirmed", "cancelled", "failed"}:
+    if case["phase"] in {"confirmed", "cancelled", "failed", "rejected"}:
         next_action = None
     return CaseStatus(workflow=serialize(cursor, workflow), kind=case["kind"], subject_user_id=case["subject_user_id"],
                       entity_id=case["entity_id"], phase=case["phase"], missing_fields=case["missing_fields"], next_action=next_action)
@@ -68,24 +68,25 @@ def missing_data(cursor, workflow_id, kind, intake):
 
 def set_phase(cursor, workflow_id, phase, missing=()):
     state = {"waiting_data": "WAITING_FOR_DATA", "collecting": "EXECUTING", "awaiting_approval": "WAITING_FOR_APPROVAL",
-             "confirmed": "COMPLETED", "failed": "FAILED", "cancelled": "CANCELLED"}[phase]
+             "confirmed": "COMPLETED", "failed": "FAILED", "cancelled": "CANCELLED", "rejected": "REJECTED"}[phase]
     cursor.execute("UPDATE workflow_cases SET phase = %s, missing_fields = %s, updated_at = clock_timestamp() WHERE workflow_id = %s",
                    (phase, Json(list(missing)), workflow_id))
     cursor.execute("UPDATE workflow_runs SET status = %s, updated_at = clock_timestamp() WHERE id = %s", (state, workflow_id))
     cursor.execute("""UPDATE claims SET status = %s, updated_at = clock_timestamp() WHERE workflow_id = %s""",
                    ({"waiting_data": "waiting_for_data", "collecting": "preparing", "awaiting_approval": "prepared",
-                     "confirmed": "submitted", "failed": "failed", "cancelled": "cancelled"}[phase], workflow_id))
+                     "confirmed": "submitted", "failed": "failed", "cancelled": "cancelled", "rejected": "rejected"}[phase], workflow_id))
 
 
 def close_case(cursor, workflow_id, phase):
     set_phase(cursor, workflow_id, phase)
     cursor.execute("UPDATE patient_profiles SET status = %s, updated_at = clock_timestamp() WHERE onboarding_workflow_id = %s AND status = 'draft'",
-                   ("cancelled" if phase == "cancelled" else "failed", workflow_id))
+                   (phase if phase in {"cancelled", "rejected"} else "failed", workflow_id))
 
 
 def add_step(cursor, workflow_id, action, position):
+    from backend.risk.policy import classify
     cursor.execute("INSERT INTO workflow_steps (id,workflow_id,position,action,risk) VALUES (%s,%s,%s,%s,%s)",
-                   (str(uuid4()), workflow_id, position, action, "high" if action in {"ehr.create_patient", "insurance.submit_claim"} else "low"))
+                   (str(uuid4()), workflow_id, position, action, classify(action)))
 
 
 def start(settings, user, body, key, kind):
@@ -118,7 +119,8 @@ def start(settings, user, body, key, kind):
             if replayed:
                 workflow, case = get_case(cursor, workflow_id, user)
                 return status(cursor, workflow, case), True
-            lock_key(cursor, f"onboarding-subject:{subject}" if kind == "onboarding" else f"claim-start:{workflow_id}")
+            lock_key(cursor, f"onboarding-subject:{subject}" if kind == "onboarding" else f"claim-start:{subject}")
+            assert_no_unresolved_write(cursor, subject, "ehr.create_patient" if kind == "onboarding" else "insurance.submit_claim")
             entity_id = str(uuid4())
             if kind == "onboarding":
                 cursor.execute("SELECT 1 FROM patient_profiles WHERE owner_user_id = %s AND status = 'active'", (subject,))
@@ -281,3 +283,13 @@ def create_appointment(settings, body, user):
                 VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""", (str(uuid4()), str(body.patient_profile_id), profile["owner_user_id"],
                     body.doctor_reference, body.starts_at, body.duration_minutes))
             return AppointmentRecord(**dict(cursor.fetchone()))
+
+
+def assert_no_unresolved_write(cursor, subject, operation):
+    # Serialize reservations across cases belonging to the same patient.
+    lock_key(cursor, f"external-write:{subject}:{operation}")
+    cursor.execute("""SELECT 1 FROM tool_calls t JOIN workflow_cases c ON c.workflow_id=t.workflow_id
+        WHERE c.subject_user_id=%s AND t.server || '.' || t.tool=%s
+        AND t.approval_id IS NOT NULL AND t.status IN ('pending','uncertain') LIMIT 1""", (subject, operation))
+    if cursor.fetchone():
+        raise HTTPException(409, "An unresolved external write requires reconciliation before another attempt")

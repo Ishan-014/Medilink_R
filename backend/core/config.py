@@ -30,6 +30,9 @@ class Settings:
     graph_service_token: str | None = field(default=None, repr=False)
     graph_timeout_seconds: float = 10
     graph_max_results: int = 100
+    medium_risk_review: str = "required"
+    approval_ttl_minutes: int = 60
+    action_signing_secret: str | None = field(default=None, repr=False)
     cors_origins: tuple[str, ...] = (
         "http://localhost:5173", "http://127.0.0.1:5173"
     )
@@ -47,6 +50,8 @@ class Settings:
             raise ValueError("Document pixel and page limits must be positive")
         if not 0.1 <= self.graph_timeout_seconds <= 60 or not 1 <= self.graph_max_results <= 200:
             raise ValueError("Graph timeout must be 0.1–60 seconds and result limit 1–200")
+        if self.medium_risk_review not in {"required", "automatic"} or not 1 <= self.approval_ttl_minutes <= 1440:
+            raise ValueError("Medium risk review must be required/automatic; approval TTL must be 1–1440 minutes")
 
     @classmethod
     def from_env(cls):
@@ -72,6 +77,9 @@ class Settings:
             graph_service_token=os.getenv("MEDILINK_GRAPH_SERVICE_TOKEN") or None,
             graph_timeout_seconds=float(os.getenv("MEDILINK_GRAPH_TIMEOUT_SECONDS", "10")),
             graph_max_results=int(os.getenv("MEDILINK_GRAPH_MAX_RESULTS", "100")),
+            medium_risk_review=os.getenv("MEDILINK_MEDIUM_RISK_REVIEW", "required"),
+            approval_ttl_minutes=int(os.getenv("MEDILINK_APPROVAL_TTL_MINUTES", "60")),
+            action_signing_secret=os.getenv("MEDILINK_ACTION_SIGNING_SECRET") or None,
             cors_origins=tuple(
                 origin.strip() for origin in os.getenv(
                     "MEDILINK_CORS_ORIGINS",

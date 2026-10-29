@@ -267,3 +267,23 @@ def test_part6_preserves_existing_cases_and_enforces_graph_step_membership(datab
                 (id,workflow_id,workflow_step_id,patient_profile_id,actor_user_id,operation,request_fingerprint)
                 VALUES (%s,%s,%s,%s,'existing','claim_history',%s)""", (str(uuid4()), other_workflow, step_id, profile_id, "a" * 64))
         cursor.execute("ROLLBACK TO SAVEPOINT wrong_graph_workflow")
+
+
+def test_part7_upgrade_preserves_existing_calls_without_inventing_approvals(database,tmp_path):
+    for path in migration_files():
+        if path.name.startswith("0007_"):
+            break
+        (tmp_path/path.name).write_bytes(path.read_bytes())
+    migrate(database,directory=tmp_path)
+    workflow_id,step_id,call_id = (str(uuid4()) for _ in range(3))
+    with database.cursor() as cursor:
+        cursor.execute("INSERT INTO workflow_runs (id,owner_user_id,workflow_type,request) VALUES (%s,'legacy','onboarding','Existing request')",(workflow_id,))
+        cursor.execute("INSERT INTO workflow_steps (id,workflow_id,position,action,risk) VALUES (%s,%s,0,'ehr.create_patient','high')",(step_id,workflow_id))
+        cursor.execute("""INSERT INTO tool_calls (id,workflow_id,workflow_step_id,actor_user_id,server,tool,request_fingerprint)
+            VALUES (%s,%s,%s,'legacy','ehr','create_patient',%s)""",(call_id,workflow_id,step_id,'a'*64))
+    migrate(database)
+    with database.cursor() as cursor:
+        cursor.execute("SELECT actor_user_id,risk,approval_id FROM tool_calls WHERE id=%s",(call_id,))
+        assert cursor.fetchone() == ('legacy','medium',None)
+        cursor.execute("SELECT count(*) FROM approvals")
+        assert cursor.fetchone() == (0,)

@@ -95,7 +95,7 @@ def confirm_patient(cursor, case, call, patient):
     set_phase(cursor, str(case["workflow_id"]), "confirmed")
 
 
-def capture(cursor, call, arguments, result):
+def capture(cursor, call, arguments, result, *, settings=None):
     cursor.execute("SELECT * FROM workflow_cases WHERE workflow_id=%s", (str(call["workflow_id"]),))
     case = cursor.fetchone()
     if not case:
@@ -127,6 +127,8 @@ def capture(cursor, call, arguments, result):
             else:
                 add_step(cursor, workflow_id, "ehr.create_patient", 1)
                 set_phase(cursor, workflow_id, "awaiting_approval")
+                from backend.services.approval_service import enqueue
+                enqueue(cursor, workflow_id, call["actor_user_id"], settings)
         elif operation == "ehr.create_patient":
             try:
                 patient = PatientSource.model_validate(value)
@@ -143,6 +145,8 @@ def capture(cursor, call, arguments, result):
     try:
         facts = models[operation].model_validate(value).model_dump(mode="json")
     except (ValidationError, KeyError):
+        if operation == "insurance.submit_claim":
+            raise invalid()
         set_phase(cursor, workflow_id, "waiting_data", [operation.replace(".", "_") + "_evidence"])
         return
     # A schema-valid answer about a different patient/policy/procedure is rejected.
@@ -173,3 +177,5 @@ def capture(cursor, call, arguments, result):
             from backend.services.graph_service import evidence_ready
             if not data.get("use_graph") or evidence_ready(cursor, workflow_id):
                 set_phase(cursor, workflow_id, "awaiting_approval")
+                from backend.services.approval_service import enqueue
+                enqueue(cursor, workflow_id, call["actor_user_id"], settings)

@@ -1,4 +1,4 @@
-# Backend integration contracts (Part 6)
+# Backend integration contracts (Part 7)
 
 Implemented: health, patient auth, current identity, admin provisioning, workflow
 creation/list/detail/plan/transitions/cancellation, and persistent document APIs.
@@ -7,7 +7,9 @@ setup, permissions and extraction handoff. [Part 4](part-4.md) adds controlled
 hospital-tool execution and trace metadata. [Part 5](part-5.md) adds managed
 onboarding/claim preparation and local patient/claim/appointment records.
 [Part 6](part-6.md) adds the graph service boundary and graph-dependent claim
-evidence. Audit routes remain planned. Existing
+evidence. [Part 7](part-7.md) adds authoritative risk policy, approval queues,
+canonical action previews, independent approve/reject decisions and single-use
+approved execution. Audit routes remain planned. Existing
 unprefixed routes retain their response formats.
 Ownership and current roles are always resolved server-side.
 

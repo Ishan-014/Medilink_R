@@ -96,7 +96,7 @@ class HospitalClient:
         except Exception as exc:
             raise normalized_error(exc, False) from exc
 
-    async def call(self, server, tool_name, arguments):
+    async def call(self, server, tool_name, arguments, *, context=None):
         dispatched = False
         try:
             checked_json(arguments, 65536, "MCP_INPUT_INVALID")
@@ -114,7 +114,7 @@ class HospitalClient:
                     outgoing = schema_validator(tool.outputSchema)
                     matches(incoming, arguments, "MCP_INPUT_INVALID")
                     dispatched = True
-                    response = await session.call_tool(tool_name, arguments)
+                    response = await session.call_tool(tool_name, arguments, **({"meta": context} if context is not None else {}))
                     if response.isError:
                         raise IntegrationError("MCP_REMOTE_ERROR")
                     result = response.structuredContent
