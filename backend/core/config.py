@@ -21,6 +21,10 @@ class Settings:
     db_statement_timeout_ms: int = 5000
     jwt_secret: str | None = field(default=None, repr=False)
     access_token_minutes: int = 60
+    document_storage_dir: Path = PROJECT_ROOT / "var" / "documents"
+    document_max_bytes: int = 5 * 1024 * 1024
+    document_max_image_pixels: int = 20_000_000
+    document_max_pdf_pages: int = 100
     cors_origins: tuple[str, ...] = (
         "http://localhost:5173", "http://127.0.0.1:5173"
     )
@@ -32,6 +36,10 @@ class Settings:
             raise ValueError("Database timeouts must be positive")
         if not 1 <= self.access_token_minutes <= 480:
             raise ValueError("MEDILINK_ACCESS_TOKEN_MINUTES must be between 1 and 480")
+        if not 1 <= self.document_max_bytes <= 25 * 1024 * 1024:
+            raise ValueError("MEDILINK_DOCUMENT_MAX_BYTES must be between 1 and 25 MiB")
+        if self.document_max_image_pixels < 1 or self.document_max_pdf_pages < 1:
+            raise ValueError("Document pixel and page limits must be positive")
 
     @classmethod
     def from_env(cls):
@@ -47,6 +55,10 @@ class Settings:
             db_statement_timeout_ms=int(os.getenv("MEDILINK_DB_STATEMENT_TIMEOUT_MS", "5000")),
             jwt_secret=os.getenv("MEDILINK_JWT_SECRET"),
             access_token_minutes=int(os.getenv("MEDILINK_ACCESS_TOKEN_MINUTES", "60")),
+            document_storage_dir=PROJECT_ROOT / Path(os.getenv("MEDILINK_DOCUMENT_STORAGE_DIR", "var/documents")).expanduser(),
+            document_max_bytes=int(os.getenv("MEDILINK_DOCUMENT_MAX_BYTES", str(5 * 1024 * 1024))),
+            document_max_image_pixels=int(os.getenv("MEDILINK_DOCUMENT_MAX_IMAGE_PIXELS", "20000000")),
+            document_max_pdf_pages=int(os.getenv("MEDILINK_DOCUMENT_MAX_PDF_PAGES", "100")),
             cors_origins=tuple(
                 origin.strip() for origin in os.getenv(
                     "MEDILINK_CORS_ORIGINS",

@@ -1,9 +1,10 @@
-# Backend integration contracts (Part 2)
+# Backend integration contracts (Part 3)
 
 Implemented: health, patient auth, current identity, admin provisioning, workflow
-creation/list/detail/plan/transitions/cancellation. See [part-2.md](part-2.md) for
-roles, authentication stages, versions, examples, and setup. Document and audit
-routes remain planned. Existing unprefixed routes retain their response formats.
+creation/list/detail/plan/transitions/cancellation, and persistent document APIs.
+See [part-2.md](part-2.md) for auth/workflows and [part-3.md](part-3.md) for document
+setup, permissions and extraction handoff. Audit routes remain planned. Existing
+unprefixed routes retain their response formats.
 Ownership and current roles are always resolved server-side.
 
 ## Response format
@@ -41,8 +42,11 @@ and `INTERNAL_ERROR`; other HTTP statuses use `HTTP_ERROR`.
 | PUT `/api/workflows/{id}/plan` | `expected_version`, ordered `steps` (`action`) | Staff-only plan persistence during PLANNING |
 | POST `/api/workflows/{id}/transitions` | `expected_version`, target `status` | Staff-only, valid transition; conflicts return 409 |
 | POST `/api/workflows/{id}/cancel` | `expected_version` | Owner/authorized staff cancellation |
-| POST `/api/documents` (planned) | Multipart file; types/limits finalized in Part 3 | `DocumentMetadata`; 201 |
-| GET `/api/documents/{id}` (planned) | Document UUID | Authorized `DocumentMetadata`; no public storage URL |
+| POST `/api/documents` | Multipart `file`; PDF/TXT/PNG/JPEG, 5 MiB default | `DocumentMetadata`; 201, extraction pending |
+| GET `/api/documents` | `limit` (1–100), `offset` | Scoped metadata list |
+| GET `/api/documents/{id}` | Document UUID | Authorized `DocumentMetadata`; no public storage URL |
+| GET `/api/documents/{id}/content` | Document UUID | Authenticated source attachment; no JSON envelope |
+| GET `/api/documents/{id}/extraction` | Document UUID | Stored extraction status, version, fields/text and safe error code |
 | GET `/api/workflows/{id}/trace` (planned) | Workflow UUID | Authorized plan, steps, tool-call references, approvals, errors, and audit events; finalized in Part 8 |
 | GET `/api/audit` (planned) | Pagination/date/status filters; finalized in Part 8 | Authorized `AuditEvent` collection |
 
@@ -57,13 +61,15 @@ are distinct staff roles; there is no unrestricted shared `staff` role.
 
 Workflow types: `onboarding`, `insurance_claim`, `appointment`. Requests must contain
 1–10,000 characters after trimming. The schema reserves up to 20 document UUID
-references, but nonempty references are rejected until Part 3 validates ownership.
+references; Part 3 checks existence/content access, rejects duplicates, and persists
+foreign-key-backed links atomically. Other patients' documents return 404.
 Unknown fields (including owner, status, risk, and approval) are rejected. Raw
 documents are stored separately from workflow records.
 
 `WorkflowRun` contains UUID `id`, `owner_user_id`, `workflow_type`, `status`, UTC
 `created_at`/`updated_at`, optimistic concurrency `version`, and ordered `steps`.
-Each step contains UUID `id`, a zero-based `position`, `action`, `status`, optional `risk`, and optional
+`document_ids` contains linked source UUIDs. Each step contains UUID `id`, a
+zero-based `position`, `action`, `status`, optional `risk`, and optional
 `result_reference`. References are not raw tool payloads or documents.
 
 Workflow statuses: `CREATED`, `PLANNING`, `WAITING_FOR_DATA`, `EXECUTING`,
@@ -73,10 +79,14 @@ states. It persists plans without invoking the AI/MCP layer. Risk tiers are `low
 `high`; authoritative risk classification/approval enforcement arrives in Part 7.
 
 `DocumentMetadata` contains UUID `id`, `filename`, `media_type`, `size_bytes`,
-`extraction_status` (`pending`, `processing`, `completed`, `failed`), and `created_at`.
+`extraction_status` (`pending`, `processing`, `completed`, `failed`), `created_at`,
+`updated_at`, `owner_user_id`, `extraction_version` and optional safe
+`extraction_error_code`. Raw files remain in private storage. Extraction results
+are persisted separately from metadata and are subject to content-access checks.
 `AuditEvent` contains UUID `id`, optional `workflow_id`, `actor_user_id`, `action`,
 `resource_type`, `resource_id`, `outcome` (`success`, `denied`, `failure`), and
-`created_at`. Document and audit persistence remain deferred to Parts 3 and 8.
+`created_at`. Document persistence is implemented in Part 3; audit persistence
+remains Part 8 work.
 
 The backend contract is separate from LangGraph's internal agent state. AI/MCP
 owners should map their execution results to these boundaries without sharing

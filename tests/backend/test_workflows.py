@@ -112,7 +112,7 @@ def test_workflow_input_validation_pagination_and_unauthenticated_access(api_env
     client = api_env.client
     assert client.post("/api/workflows", json=BODY).status_code == 401
     assert create(api_env, body={**BODY, "owner_user_id": "forged"}).status_code == 422
-    assert create(api_env, body={**BODY, "document_ids": [str(uuid4())]}).status_code == 422
+    assert create(api_env, body={**BODY, "document_ids": [str(uuid4())]}).status_code == 404
     assert client.get("/api/workflows?limit=101", headers=api_env.headers()).status_code == 422
     assert client.get("/api/workflows/not-a-uuid", headers=api_env.headers()).status_code == 422
     for _ in range(3):

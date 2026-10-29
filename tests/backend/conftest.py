@@ -17,7 +17,8 @@ from backend.db.migrate import migrate
 TEST_PASSWORD = "Synthetic-password-2026!"
 TEST_SECRET = "part2-isolated-test-secret-with-more-than-32-characters"
 TEST_HASH = PASSWORD_HASH.hash(TEST_PASSWORD)
-TABLES = ("consumed_auth_stages", "workflow_action_keys", "workflow_creation_keys",
+TABLES = ("workflow_documents", "document_extraction_results", "documents",
+          "consumed_auth_stages", "workflow_action_keys", "workflow_creation_keys",
           "workflow_steps", "workflow_runs", "users", "schema_migrations")
 
 
@@ -35,7 +36,7 @@ class APIEnvironment:
 
 
 @pytest.fixture
-def api_env(monkeypatch):
+def api_env(monkeypatch, tmp_path):
     dsn = os.getenv("MEDILINK_TEST_DB_DSN")
     if not dsn:
         pytest.skip("Set MEDILINK_TEST_DB_DSN to an empty disposable database")
@@ -44,12 +45,14 @@ def api_env(monkeypatch):
         db_name=params.get("dbname", "postgres"), db_host=params.get("host", "localhost"),
         db_port=int(params.get("port", "5432")), db_user=params.get("user", "postgres"),
         db_password=params.get("password"), jwt_secret=TEST_SECRET,
+        document_storage_dir=tmp_path / "documents",
     )
     for name, value in {
         "MEDILINK_DB_NAME": config.db_name, "MEDILINK_DB_HOST": config.db_host,
         "MEDILINK_DB_PORT": str(config.db_port), "MEDILINK_DB_USER": config.db_user,
         "MEDILINK_DB_PASSWORD": config.db_password or "", "MEDILINK_JWT_SECRET": TEST_SECRET,
         "MEDILINK_CARD_SECRET": "part2-isolated-card-secret-with-more-than-32-characters",
+        "MEDILINK_DOCUMENT_STORAGE_DIR": str(config.document_storage_dir),
     }.items():
         monkeypatch.setenv(name, value)
     get_settings.cache_clear()

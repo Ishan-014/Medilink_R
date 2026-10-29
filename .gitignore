@@ -35,3 +35,6 @@ frontend/dist/
 backend/data/reference_faces/
 data/reference_faces/
 auth_prototype/data/reference_faces/
+
+# Private uploaded documents and staging files
+/var/documents/

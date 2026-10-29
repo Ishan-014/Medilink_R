@@ -9,6 +9,7 @@ from psycopg2.extras import Json, RealDictCursor
 
 from backend.api.schemas import Role, WorkflowRun
 from backend.db.connection import connection
+from backend.services.document_service import link_documents
 
 EDITORS = {Role.DOCTOR, Role.RECEPTIONIST, Role.ADMIN}
 READERS = EDITORS | {Role.AUDITOR}
@@ -54,7 +55,7 @@ def serialize(cursor, row) -> WorkflowRun:
         for step in cursor.fetchall()
     ]
     return WorkflowRun(**{
-        key: row[key] for key in ("id", "owner_user_id", "workflow_type", "status", "created_at", "updated_at", "version")
+        key: row[key] for key in ("id", "owner_user_id", "workflow_type", "status", "created_at", "updated_at", "version", "document_ids")
     }, steps=steps)
 
 
@@ -87,8 +88,6 @@ def list_workflows(settings, user, *, status=None, workflow_type=None, limit=50,
 def create_workflow(settings, body, user, key: str | None):
     if user["role"] == Role.AUDITOR:
         raise HTTPException(403, "Auditors have read-only access")
-    if body.document_ids:
-        raise HTTPException(422, "Document ownership validation is not available until Part 3")
     request_hash = fingerprint(body.model_dump(mode="json"))
     with connection(settings) as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -110,6 +109,7 @@ def create_workflow(settings, body, user, key: str | None):
             """, (workflow_id, user["user_id"], body.workflow_type.value, body.request,
                   Json([str(d) for d in body.document_ids])))
             row = cursor.fetchone()
+            link_documents(cursor, workflow_id, body.document_ids, user)
             if key:
                 cursor.execute("""
                     INSERT INTO workflow_creation_keys (owner_user_id, idempotency_key, fingerprint, workflow_id)
@@ -148,6 +148,12 @@ def change_workflow(settings, workflow_id, user, body, *, plan=False):
                 if target not in TRANSITIONS[row["status"]]:
                     raise HTTPException(409, "Invalid or approval-protected workflow transition")
                 if target in {"EXECUTING", "COMPLETED"}:
+                    cursor.execute("""
+                        SELECT 1 FROM workflow_documents wd JOIN documents d ON d.id = wd.document_id
+                        WHERE wd.workflow_id = %s AND d.extraction_status <> 'completed' LIMIT 1
+                    """, (workflow_id,))
+                    if cursor.fetchone():
+                        raise HTTPException(409, "Attached documents must finish extraction before execution")
                     cursor.execute("SELECT status, result_reference FROM workflow_steps WHERE workflow_id = %s", (workflow_id,))
                     steps = cursor.fetchall()
                     if not steps:

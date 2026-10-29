@@ -11,11 +11,9 @@ from fastapi import (
 from pydantic import BaseModel
 
 from typing import Optional, List
-from io import BytesIO
 
 import re
 
-from pypdf import PdfReader
 
 from backend.application import create_app
 from backend.db.connection import connect
@@ -24,6 +22,7 @@ from backend.auth.security import current_identity, settings_for_request, requir
 from backend.api.schemas import Role
 from backend.api.auth import PasswordInput, password_login
 from backend.core.config import Settings
+from backend.services.legacy_document_service import upload_chat_document as persist_chat_document
 from backend.agents.graph import run_conversation
 # ==========================================================
 # FASTAPI APPLICATION
@@ -31,18 +30,6 @@ from backend.agents.graph import run_conversation
 
 app = create_app()
 
-
-
-# ==========================================================
-# TEMPORARY DOCUMENT STORAGE
-#
-# For prototype only.
-# Documents disappear if backend restarts.
-# ==========================================================
-
-uploaded_documents = {}
-
-MAX_FILE_SIZE = 5 * 1024 * 1024
 
 
 # ==========================================================
@@ -679,213 +666,9 @@ def chatbot(
 # ==========================================================
 
 @app.post("/chat/upload")
-async def upload_chat_document(
+def upload_chat_document(
     file: UploadFile = File(...),
-    current_user=Depends(require_roles(Role.DOCTOR, Role.RECEPTIONIST))
+    current_user=Depends(require_roles(Role.DOCTOR, Role.RECEPTIONIST)),
+    settings: Settings = Depends(settings_for_request),
 ):
-
-    filename = (
-        file.filename
-        or "uploaded_file"
-    )
-
-
-    filename_lower = (
-        filename.lower()
-    )
-
-
-    # ------------------------------------------------------
-    # File type validation
-    # ------------------------------------------------------
-
-    if not (
-
-        filename_lower.endswith(
-            ".pdf"
-        )
-
-        or
-
-        filename_lower.endswith(
-            ".txt"
-        )
-
-    ):
-
-        raise HTTPException(
-            status_code=400,
-
-            detail=(
-                "Only PDF and TXT files "
-                "are currently supported."
-            )
-        )
-
-
-    # ------------------------------------------------------
-    # Read file
-    # ------------------------------------------------------
-
-    contents = await file.read()
-
-
-    # ------------------------------------------------------
-    # File size check
-    # ------------------------------------------------------
-
-    if len(contents) > MAX_FILE_SIZE:
-
-        raise HTTPException(
-            status_code=413,
-
-            detail=(
-                "File is too large. "
-                "Maximum size is 5 MB."
-            )
-        )
-
-
-    extracted_text = ""
-
-
-    # ======================================================
-    # TXT EXTRACTION
-    # ==========================================================
-
-    if filename_lower.endswith(
-        ".txt"
-    ):
-
-        try:
-
-            extracted_text = (
-                contents.decode(
-                    "utf-8",
-                    errors="ignore"
-                )
-            )
-
-        except Exception:
-
-            raise HTTPException(
-                status_code=400,
-                detail="Unable to read TXT file."
-            )
-
-
-    # ======================================================
-    # PDF EXTRACTION
-    # ==========================================================
-
-    elif filename_lower.endswith(
-        ".pdf"
-    ):
-
-        try:
-
-            reader = PdfReader(
-                BytesIO(contents)
-            )
-
-
-            pages_text = []
-
-
-            for page in reader.pages:
-
-                page_text = (
-                    page.extract_text()
-                    or ""
-                )
-
-
-                pages_text.append(
-                    page_text
-                )
-
-
-            extracted_text = (
-                "\n".join(
-                    pages_text
-                )
-            )
-
-        except Exception:
-
-            raise HTTPException(
-                status_code=400,
-                detail="Unable to read PDF file."
-            )
-
-
-    # ------------------------------------------------------
-    # Clean extracted text
-    # ------------------------------------------------------
-
-    extracted_text = (
-        extracted_text.strip()
-    )
-
-
-    if not extracted_text:
-
-        raise HTTPException(
-            status_code=400,
-
-            detail=(
-                "No readable text was found. "
-                "The PDF may be scanned or image-based."
-            )
-        )
-
-
-    # ------------------------------------------------------
-    # Store against logged-in user
-    # ------------------------------------------------------
-
-    uploaded_documents[
-        current_user["user_id"]
-    ] = {
-
-        "filename":
-            filename,
-
-        "text":
-            extracted_text[:50000],
-
-        "role":
-            current_user["role"]
-    }
-
-
-    # ------------------------------------------------------
-    # Return result
-    # ------------------------------------------------------
-
-    return {
-
-        "message":
-            "Document uploaded and processed successfully.",
-
-        "filename":
-            filename,
-
-        "file_type":
-            (
-                "PDF"
-
-                if filename_lower.endswith(
-                    ".pdf"
-                )
-
-                else "TXT"
-            ),
-
-        "characters_extracted":
-            len(extracted_text),
-
-        "preview":
-            extracted_text[:500]
-
-    }
+    return persist_chat_document(settings, file, current_user)

@@ -170,3 +170,38 @@ def test_incompatible_legacy_identity_schema_fails_without_partial_migration(dat
         assert cursor.fetchall() == [("preserve-me",)]
         cursor.execute("SELECT to_regclass('public.workflow_runs')")
         assert cursor.fetchone()[0] is None
+
+
+def test_part3_upgrade_preserves_part2_data_and_enforces_document_links(database, tmp_path):
+    for name in ("0001_workflow_foundation.sql", "0002_auth_and_workflows.sql"):
+        (tmp_path / name).write_bytes((MIGRATIONS_DIR / name).read_bytes())
+    migrate(database, directory=tmp_path)
+    workflow_id = str(uuid4())
+    with database.cursor() as cursor:
+        cursor.execute("INSERT INTO users (full_name,email,password_hash,role) VALUES ('Existing','existing@example.com','existing-hash','patient')")
+        cursor.execute("INSERT INTO workflow_runs (id,owner_user_id,workflow_type,request) VALUES (%s,'1','onboarding','Existing request')", (workflow_id,))
+    migrate(database)
+    with database.cursor() as cursor:
+        cursor.execute("SELECT password_hash FROM users")
+        assert cursor.fetchone()[0] == "existing-hash"
+        cursor.execute("SELECT request,document_ids FROM workflow_runs WHERE id = %s", (workflow_id,))
+        assert cursor.fetchone() == ("Existing request", [])
+        cursor.execute("SAVEPOINT invalid_document_link")
+        with pytest.raises(psycopg2.IntegrityError):
+            cursor.execute("INSERT INTO workflow_documents (workflow_id,document_id) VALUES (%s,%s)", (workflow_id, str(uuid4())))
+        cursor.execute("ROLLBACK TO SAVEPOINT invalid_document_link")
+
+
+def test_part3_refuses_unmanaged_document_references(database, tmp_path):
+    for name in ("0001_workflow_foundation.sql", "0002_auth_and_workflows.sql"):
+        (tmp_path / name).write_bytes((MIGRATIONS_DIR / name).read_bytes())
+    migrate(database, directory=tmp_path)
+    with database.cursor() as cursor:
+        cursor.execute("""INSERT INTO workflow_runs (id,owner_user_id,workflow_type,request,document_ids)
+            VALUES (%s,'legacy','onboarding','Unmanaged reference','["unknown-document"]')""", (str(uuid4()),))
+        cursor.execute("SAVEPOINT before_document_upgrade")
+        with pytest.raises(psycopg2.errors.RaiseException):
+            migrate(database)
+        cursor.execute("ROLLBACK TO SAVEPOINT before_document_upgrade")
+        cursor.execute("SELECT to_regclass('public.documents')")
+        assert cursor.fetchone()[0] is None

@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any, Generic, Literal, TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 T = TypeVar("T")
 
@@ -96,6 +96,7 @@ class WorkflowRun(Contract):
     created_at: datetime
     updated_at: datetime
     version: int = Field(default=0, ge=0)
+    document_ids: list[UUID] = Field(default_factory=list)
     steps: list[WorkflowStep] = Field(default_factory=list)
 
 
@@ -106,6 +107,37 @@ class DocumentMetadata(Contract):
     size_bytes: int = Field(ge=0)
     extraction_status: Literal["pending", "processing", "completed", "failed"]
     created_at: datetime
+    owner_user_id: str
+    updated_at: datetime
+    extraction_version: int = Field(ge=0)
+    extraction_error_code: Literal["EXTRACTION_FAILED", "SOURCE_UNAVAILABLE", "NO_READABLE_TEXT"] | None = None
+
+
+class ExtractedField(Contract):
+    name: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.]{0,99}$")
+    value: str = Field(max_length=5000)
+    confidence: float = Field(ge=0, le=1)
+    validation_status: Literal["unreviewed", "valid", "needs_review", "invalid"] = "unreviewed"
+
+
+class ExtractionResult(Contract):
+    text: str = Field(default="", max_length=100000)
+    fields: list[ExtractedField] = Field(default_factory=list, max_length=100)
+
+    @field_validator("fields")
+    @classmethod
+    def unique_field_names(cls, fields):
+        if len({field.name for field in fields}) != len(fields):
+            raise ValueError("Extracted field names must be unique")
+        return fields
+
+
+class DocumentExtraction(Contract):
+    document_id: UUID
+    status: Literal["pending", "processing", "completed", "failed"]
+    version: int = Field(ge=0)
+    result: ExtractionResult | None = None
+    error_code: Literal["EXTRACTION_FAILED", "SOURCE_UNAVAILABLE", "NO_READABLE_TEXT"] | None = None
 
 
 class AuditEvent(Contract):
