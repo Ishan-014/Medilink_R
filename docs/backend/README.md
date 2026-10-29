@@ -11,6 +11,8 @@ Requirements: Git, Python 3.12+ for the setup utility, and running Docker Compos
 From a new clone of `backend-part-10`:
 
 ```bash
+git clone --branch backend-part-10 https://github.com/Ishan-014/Medilink_R.git medilink-backend
+cd medilink-backend
 python -m backend.ops.init_env
 docker compose -f compose.backend.yaml config --quiet
 docker compose -f compose.backend.yaml up --build --detach --wait

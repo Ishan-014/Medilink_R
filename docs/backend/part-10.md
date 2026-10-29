@@ -29,10 +29,13 @@ Historical part documents remain as implementation-stage records.
 
 The final delivery records are maintained under `docs/backend/evidence/`:
 
-- `part-10-tests.json`: full backend unit/API/security/database suite.
-- `part-10-rehearsal.json`: selected synthetic acceptance scenarios and coverage.
-- `part-10-clean-clone.json`: documented initialization/startup from a clean local
-  clone, runtime/configuration identity and isolated cleanup.
+- [Tests](evidence/part-10-tests.json): **326 passed**, zero failures/errors/skips,
+  including secret-safe setup, contract drift and documentation-link checks.
+- [Rehearsal](evidence/part-10-rehearsal.json): **18 passed**, covering all twelve
+  backend AT identifiers with synthetic peers and a disposable DB.
+- [Clean clone](evidence/part-10-clean-clone.json): initialization/startup, matching
+  runtime OpenAPI, custom CORS/token/upload settings, patient/workflow/source
+  persistence, eight applied migrations and isolated cleanup all passed.
 
 The clean-clone check uses a newly committed candidate, creates a private ignored
 `.env`, starts a uniquely named Compose project, verifies public health/schema,

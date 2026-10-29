@@ -1,0 +1,12 @@
+{
+  "scope": "final backend delivery unit/API/security/database tests",
+  "python": "3.14.4",
+  "tests": 326,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "passed": 326,
+  "duration_seconds": 58.933,
+  "database": "PostgreSQL 18.6, disposable empty database",
+  "passes": true
+}

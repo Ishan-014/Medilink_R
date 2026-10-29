@@ -1,0 +1,26 @@
+{
+  "scope": "clean local Git clone; documented backend-only initialization and Compose startup",
+  "checks": {
+    "fresh_git_checkout": true,
+    "private_independent_secrets": true,
+    "compose_startup_and_health": true,
+    "non_root_and_no_env_in_image": true,
+    "published_openapi_matches_runtime": true,
+    "custom_cors_and_token_lifetime": true,
+    "custom_upload_limit": true,
+    "patient_auth_workflow_and_document_persistence": true,
+    "migration_replay_is_noop": true,
+    "tracked_checkout_remained_clean": true
+  },
+  "candidate_commit": "0e8954b4e4ac912052be7dfe5671f9e90d92ea20",
+  "backend_tree": "f01a56d5e035f64854a55ce74b8450ad10c0f363",
+  "configuration_sha256": {
+    ".env.example": "b92b4d88d662ec332a3d924e3805b64b2fd2ca7f4493d4064095d0579bb7ee98",
+    "compose.backend.yaml": "a92d1fa6537fa2161c491b6aeda52accd93ab2cb0a409a1d446bdd52595e0487",
+    ".dockerignore": "90e9d1010001fd759bcee72ca0a344bde3630430787881c16261b9ae2af2671a",
+    "docs/backend/openapi.json": "8f163d36f46cf6cc01b95cc89bc1db440681f712b161bd8ba1b929d66a87cfa7"
+  },
+  "applied_migrations": 8,
+  "passes": true,
+  "cleanup": true
+}
