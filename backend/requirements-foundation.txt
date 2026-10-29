@@ -1,0 +1,6 @@
+# Part 1 API, contracts, configuration, and migration dependencies.
+fastapi>=0.115,<1
+pydantic>=2.9,<3
+uvicorn>=0.30,<1
+psycopg2-binary>=2.9,<3
+python-dotenv>=1,<2

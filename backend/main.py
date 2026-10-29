@@ -2,7 +2,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import (
-    FastAPI,
     HTTPException,
     Depends,
     UploadFile,
@@ -14,21 +13,20 @@ from fastapi.security import (
     HTTPAuthorizationCredentials
 )
 
-from fastapi.middleware.cors import CORSMiddleware
-
 from pydantic import BaseModel
 
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
-import psycopg2
 import jwt
-import os
 import re
 
 from pwdlib import PasswordHash
 from pypdf import PdfReader
+
+from backend.application import create_app
+from backend.db.connection import connect
 
 from backend.auth.router import router as auth_router
 from backend.auth.credentials import JWT_SECRET, JWT_ALGORITHM
@@ -37,30 +35,10 @@ from backend.agents.graph import run_conversation
 # FASTAPI APPLICATION
 # ==========================================================
 
-app = FastAPI(
-    title="MediLink Backend",
-    version="1.0"
-)
+app = create_app()
 
-# Three-layer staff authentication: credentials → ID card → face.
+# Three-layer staff authentication: credentials -> ID card -> face.
 app.include_router(auth_router)
-
-
-# ==========================================================
-# CORS
-# React frontend access
-# ==========================================================
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 # ==========================================================
@@ -100,13 +78,7 @@ MAX_FILE_SIZE = 5 * 1024 * 1024
 # ==========================================================
 
 def get_db_connection():
-    return psycopg2.connect(
-        dbname=os.getenv("MEDILINK_DB_NAME", "medilink"),
-        host=os.getenv("MEDILINK_DB_HOST", "localhost"),
-        port=os.getenv("MEDILINK_DB_PORT", "5432"),
-        user=os.getenv("MEDILINK_DB_USER", "postgres"),
-        password=os.getenv("MEDILINK_DB_PASSWORD"),
-    )
+    return connect()
 
 
 def normalize_patient_record(patient):
