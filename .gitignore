@@ -38,3 +38,4 @@ auth_prototype/data/reference_faces/
 
 # Private uploaded documents and staging files
 /var/documents/
+/backend/config/mcp.local.json

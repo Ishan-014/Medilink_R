@@ -45,7 +45,7 @@ def install_error_handlers(app: FastAPI):
             return await http_exception_handler(request, exc)
         return error_response(
             request, exc.status_code,
-            HTTP_CODES.get(exc.status_code, "HTTP_ERROR"),
+            getattr(exc, "error_code", HTTP_CODES.get(exc.status_code, "HTTP_ERROR")),
             str(exc.detail) if exc.status_code < 500 else "Service temporarily unavailable.",
             headers=exc.headers,
         )

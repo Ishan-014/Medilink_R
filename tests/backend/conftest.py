@@ -17,7 +17,7 @@ from backend.db.migrate import migrate
 TEST_PASSWORD = "Synthetic-password-2026!"
 TEST_SECRET = "part2-isolated-test-secret-with-more-than-32-characters"
 TEST_HASH = PASSWORD_HASH.hash(TEST_PASSWORD)
-TABLES = ("workflow_documents", "document_extraction_results", "documents",
+TABLES = ("tool_calls", "workflow_documents", "document_extraction_results", "documents",
           "consumed_auth_stages", "workflow_action_keys", "workflow_creation_keys",
           "workflow_steps", "workflow_runs", "users", "schema_migrations")
 

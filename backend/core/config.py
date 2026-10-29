@@ -25,6 +25,7 @@ class Settings:
     document_max_bytes: int = 5 * 1024 * 1024
     document_max_image_pixels: int = 20_000_000
     document_max_pdf_pages: int = 100
+    mcp_config_file: Path | None = None
     cors_origins: tuple[str, ...] = (
         "http://localhost:5173", "http://127.0.0.1:5173"
     )
@@ -59,6 +60,8 @@ class Settings:
             document_max_bytes=int(os.getenv("MEDILINK_DOCUMENT_MAX_BYTES", str(5 * 1024 * 1024))),
             document_max_image_pixels=int(os.getenv("MEDILINK_DOCUMENT_MAX_IMAGE_PIXELS", "20000000")),
             document_max_pdf_pages=int(os.getenv("MEDILINK_DOCUMENT_MAX_PDF_PAGES", "100")),
+            mcp_config_file=(PROJECT_ROOT / Path(os.environ["MEDILINK_MCP_CONFIG_FILE"]).expanduser()
+                             if os.getenv("MEDILINK_MCP_CONFIG_FILE") else None),
             cors_origins=tuple(
                 origin.strip() for origin in os.getenv(
                     "MEDILINK_CORS_ORIGINS",

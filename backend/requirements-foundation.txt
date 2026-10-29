@@ -11,3 +11,5 @@ python-multipart>=0.0.20,<1
 qrcode[pil]>=8,<9
 pypdf>=5,<7
 Pillow>=11,<14
+mcp>=1.30,<2
+jsonschema>=4.23,<5

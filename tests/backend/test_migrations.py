@@ -205,3 +205,23 @@ def test_part3_refuses_unmanaged_document_references(database, tmp_path):
         cursor.execute("ROLLBACK TO SAVEPOINT before_document_upgrade")
         cursor.execute("SELECT to_regclass('public.documents')")
         assert cursor.fetchone()[0] is None
+
+
+def test_part4_upgrade_preserves_data_and_rejects_cross_workflow_calls(database, tmp_path):
+    for name in ("0001_workflow_foundation.sql", "0002_auth_and_workflows.sql", "0003_documents.sql"):
+        (tmp_path / name).write_bytes((MIGRATIONS_DIR / name).read_bytes())
+    migrate(database, directory=tmp_path)
+    first, second, step = str(uuid4()), str(uuid4()), str(uuid4())
+    with database.cursor() as cursor:
+        for workflow_id in (first, second):
+            cursor.execute("INSERT INTO workflow_runs (id,owner_user_id,workflow_type,request) VALUES (%s,'existing','onboarding','Existing request')", (workflow_id,))
+        cursor.execute("INSERT INTO workflow_steps (id,workflow_id,position,action) VALUES (%s,%s,0,'ehr.get_patient')", (step, first))
+    migrate(database)
+    with database.cursor() as cursor:
+        cursor.execute("SELECT count(*) FROM workflow_runs")
+        assert cursor.fetchone()[0] == 2
+        cursor.execute("SAVEPOINT invalid_call")
+        with pytest.raises(psycopg2.IntegrityError):
+            cursor.execute("""INSERT INTO tool_calls (id,workflow_id,workflow_step_id,actor_user_id,server,tool,request_fingerprint)
+                VALUES (%s,%s,%s,'existing','ehr','get_patient',%s)""", (str(uuid4()), second, step, "a" * 64))
+        cursor.execute("ROLLBACK TO SAVEPOINT invalid_call")

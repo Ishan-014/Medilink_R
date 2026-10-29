@@ -11,6 +11,8 @@ from backend.api.auth import router as auth_router
 from backend.api.workflows import router as workflow_router
 from backend.api.documents import router as document_router
 from backend.api.upload_limits import UploadLimitMiddleware
+from backend.api.integrations import router as integration_router
+from backend.integrations.client import HospitalClient
 from backend.auth.router import router as staff_auth_router
 from backend.core.config import Settings, get_settings
 
@@ -19,6 +21,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     config = settings or get_settings()
     app = FastAPI(title="MediLink Backend", version="1.0")
     app.state.settings = config
+    app.state.hospital_client = HospitalClient()
     app.add_middleware(UploadLimitMiddleware, max_file_bytes=config.document_max_bytes)
     app.add_middleware(
         CORSMiddleware, allow_origins=list(config.cors_origins),
@@ -32,7 +35,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.state.request_id = uuid4().hex
         response = await call_next(request)
         response.headers["X-Request-ID"] = request.state.request_id
-        if request.url.path.startswith("/api/documents"):
+        if (request.url.path.startswith("/api/documents") or request.url.path.endswith("/tool-calls")
+                or request.url.path.startswith("/api/integrations")):
             response.headers["Cache-Control"] = "private, no-store"
             response.headers["X-Content-Type-Options"] = "nosniff"
         return response
@@ -43,4 +47,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(workflow_router)
     app.include_router(staff_auth_router)
     app.include_router(document_router)
+    app.include_router(integration_router)
     return app

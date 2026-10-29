@@ -1,0 +1,17 @@
+{
+  "servers": {
+    "ehr": {
+      "transport": "stdio",
+      "command": "python",
+      "args": ["-m", "backend.mcp.server"],
+      "env_vars": ["MEDILINK_DB_NAME", "MEDILINK_DB_HOST", "MEDILINK_DB_PORT", "MEDILINK_DB_USER", "MEDILINK_DB_PASSWORD"],
+      "timeout_seconds": 15
+    },
+    "lab": {
+      "transport": "streamable_http",
+      "url": "http://127.0.0.1:8102/mcp",
+      "bearer_token_env": "MEDILINK_LAB_MCP_TOKEN",
+      "timeout_seconds": 15
+    }
+  }
+}

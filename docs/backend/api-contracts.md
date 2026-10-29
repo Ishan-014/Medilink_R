@@ -1,9 +1,10 @@
-# Backend integration contracts (Part 3)
+# Backend integration contracts (Part 4)
 
 Implemented: health, patient auth, current identity, admin provisioning, workflow
 creation/list/detail/plan/transitions/cancellation, and persistent document APIs.
 See [part-2.md](part-2.md) for auth/workflows and [part-3.md](part-3.md) for document
-setup, permissions and extraction handoff. Audit routes remain planned. Existing
+setup, permissions and extraction handoff. [Part 4](part-4.md) adds controlled
+hospital-tool execution and trace metadata. Audit routes remain planned. Existing
 unprefixed routes retain their response formats.
 Ownership and current roles are always resolved server-side.
 
@@ -47,6 +48,10 @@ and `INTERNAL_ERROR`; other HTTP statuses use `HTTP_ERROR`.
 | GET `/api/documents/{id}` | Document UUID | Authorized `DocumentMetadata`; no public storage URL |
 | GET `/api/documents/{id}/content` | Document UUID | Authenticated source attachment; no JSON envelope |
 | GET `/api/documents/{id}/extraction` | Document UUID | Stored extraction status, version, fields/text and safe error code |
+| GET `/api/integrations` | Bearer token | Admin/auditor: configured flags and transport types |
+| GET `/api/integrations/{name}/health` | Configured server name | Admin/auditor: protocol/schema health, available backend read names |
+| POST `/api/workflows/{id}/tool-calls` | `expected_version`, `step_id`, `operation`, `arguments` | Doctor/admin: persisted call metadata and validated structured result |
+| GET `/api/workflows/{id}/tool-calls` | `limit`, `offset` | Authorized workflow readers: call metadata without payloads |
 | GET `/api/workflows/{id}/trace` (planned) | Workflow UUID | Authorized plan, steps, tool-call references, approvals, errors, and audit events; finalized in Part 8 |
 | GET `/api/audit` (planned) | Pagination/date/status filters; finalized in Part 8 | Authorized `AuditEvent` collection |
 
@@ -92,3 +97,11 @@ The backend contract is separate from LangGraph's internal agent state. AI/MCP
 owners should map their execution results to these boundaries without sharing
 credentials or giving the agent authority to self-approve actions. API routes,
 payloads, and error extensions must be reviewed across owners before integration.
+
+Part 4 integration errors add `MCP_NOT_CONFIGURED`, `MCP_CONFIG_INVALID`,
+`MCP_UNAVAILABLE`, `MCP_TIMEOUT`, `MCP_TOOL_UNAVAILABLE`, `MCP_SCHEMA_INVALID`,
+`MCP_INPUT_INVALID`, `MCP_OUTPUT_INVALID`, `MCP_REMOTE_ERROR`, and
+`MCP_WRITE_BLOCKED`. Raw remote exceptions and credentials are never returned.
+Tool calls require the matching ordered plan step in an executing workflow. All
+writes remain blocked until the Part 7 gate exists. The unchanged agent's direct
+function calls are not routed through this new boundary by Part 4.
