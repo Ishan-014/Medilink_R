@@ -1,4 +1,4 @@
-# Backend integration contracts (Part 8)
+# Backend integration contracts (Part 9)
 
 Implemented: health, patient auth, current identity, admin provisioning, workflow
 creation/list/detail/plan/transitions/cancellation, and persistent document APIs.
@@ -10,7 +10,9 @@ onboarding/claim preparation and local patient/claim/appointment records.
 evidence. [Part 7](part-7.md) adds authoritative risk policy, approval queues,
 canonical action previews, independent approve/reject decisions and single-use
 approved execution. [Part 8](part-8.md) adds audit/event feeds, paginated workflow
-traces, consistent backend error codes and authoritative receipt reconciliation. Existing
+traces, consistent backend error codes and authoritative receipt reconciliation.
+[Part 9](part-9.md) adds backend verification, Compose startup and measured read
+performance; [acceptance coverage](part-9-acceptance.md) tracks pending team integration. Existing
 unprefixed routes retain their response formats.
 Ownership and current roles are always resolved server-side.
 

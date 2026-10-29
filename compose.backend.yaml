@@ -1,0 +1,67 @@
+x-backend-environment: &backend-environment
+  MEDILINK_DB_HOST: db
+  MEDILINK_DB_PORT: "5432"
+  MEDILINK_DB_NAME: ${MEDILINK_DB_NAME:-medilink}
+  MEDILINK_DB_USER: ${MEDILINK_DB_USER:-medilink}
+  MEDILINK_DB_PASSWORD: ${MEDILINK_DB_PASSWORD:?Set MEDILINK_DB_PASSWORD}
+  MEDILINK_JWT_SECRET: ${MEDILINK_JWT_SECRET:?Set MEDILINK_JWT_SECRET}
+  MEDILINK_CARD_SECRET: ${MEDILINK_CARD_SECRET:?Set MEDILINK_CARD_SECRET}
+  MEDILINK_ACTION_SIGNING_SECRET: ${MEDILINK_ACTION_SIGNING_SECRET:-}
+  MEDILINK_DOCUMENT_STORAGE_DIR: /app/var/documents
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${MEDILINK_DB_NAME:-medilink}
+      POSTGRES_USER: ${MEDILINK_DB_USER:-medilink}
+      POSTGRES_PASSWORD: ${MEDILINK_DB_PASSWORD:?Set MEDILINK_DB_PASSWORD}
+    volumes:
+      - backend-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    image: medilink-backend:part-9
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment: *backend-environment
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "backend.db.migrate"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: "no"
+
+  backend:
+    image: medilink-backend:part-9
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment: *backend-environment
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${MEDILINK_API_PORT:-8000}:8000"
+    volumes:
+      - backend-documents:/app/var/documents
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped
+
+volumes:
+  backend-postgres:
+  backend-documents:

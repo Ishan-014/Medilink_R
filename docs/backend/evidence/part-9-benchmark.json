@@ -1,0 +1,67 @@
+{
+  "target": {
+    "p95_ms": 500,
+    "classification": "user-approved provisional target; not a confirmed SRS value"
+  },
+  "transport": "loopback HTTP, one Uvicorn worker, persistent HTTPX connection pool",
+  "environment": {
+    "python": "3.14.4",
+    "os": "Linux",
+    "postgresql": "18.6 (Ubuntu 18.6-0ubuntu0.26.04.1)",
+    "fastapi": "0.162.0",
+    "uvicorn": "0.54.0"
+  },
+  "dataset": {
+    "workflows": 200,
+    "steps_per_workflow": 5,
+    "users": 1
+  },
+  "warmup_requests_per_endpoint": 5,
+  "results": {
+    "identity": {
+      "requests": 100,
+      "concurrency": 8,
+      "failures": 0,
+      "p50_ms": 55.138,
+      "p95_ms": 63.705,
+      "p99_ms": 67.641,
+      "max_ms": 68.829,
+      "requests_per_second": 146.09,
+      "passes": true
+    },
+    "workflow_list_50": {
+      "requests": 100,
+      "concurrency": 8,
+      "failures": 0,
+      "p50_ms": 67.684,
+      "p95_ms": 87.704,
+      "p99_ms": 94.854,
+      "max_ms": 99.511,
+      "requests_per_second": 117.3,
+      "passes": true
+    },
+    "workflow_detail": {
+      "requests": 100,
+      "concurrency": 8,
+      "failures": 0,
+      "p50_ms": 64.05,
+      "p95_ms": 73.097,
+      "p99_ms": 80.167,
+      "max_ms": 84.527,
+      "requests_per_second": 122.48,
+      "passes": true
+    },
+    "workflow_trace_50": {
+      "requests": 100,
+      "concurrency": 8,
+      "failures": 0,
+      "p50_ms": 68.404,
+      "p95_ms": 76.473,
+      "p99_ms": 79.368,
+      "max_ms": 80.131,
+      "requests_per_second": 119.58,
+      "passes": true
+    }
+  },
+  "passes": true
+}

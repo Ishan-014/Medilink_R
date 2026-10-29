@@ -48,11 +48,13 @@ def load(cursor, workflow_id: str, user: dict, *, lock=False):
     return dict(row)
 
 
-def serialize(cursor, row) -> WorkflowRun:
-    cursor.execute("SELECT * FROM workflow_steps WHERE workflow_id = %s ORDER BY position", (str(row["id"]),))
+def serialize(cursor, row, *, loaded_steps=None) -> WorkflowRun:
+    if loaded_steps is None:
+        cursor.execute("SELECT * FROM workflow_steps WHERE workflow_id = %s ORDER BY position", (str(row["id"]),))
+        loaded_steps=cursor.fetchall()
     steps = [
         {key: step[key] for key in ("id", "position", "action", "status", "risk", "result_reference")}
-        for step in cursor.fetchall()
+        for step in loaded_steps
     ]
     return WorkflowRun(**{
         key: row[key] for key in ("id", "owner_user_id", "workflow_type", "status", "created_at", "updated_at", "version", "document_ids", "managed_kind", "subject_user_id")
@@ -82,7 +84,14 @@ def list_workflows(settings, user, *, status=None, workflow_type=None, limit=50,
             cursor.execute("SELECT * FROM workflow_runs" + where +
                            " ORDER BY created_at DESC, id LIMIT %s OFFSET %s", (*params, limit, offset))
             rows = cursor.fetchall()
-            return [serialize(cursor, row) for row in rows]
+            if not rows:
+                return []
+            cursor.execute("""SELECT * FROM workflow_steps WHERE workflow_id=ANY(%s::uuid[])
+                ORDER BY workflow_id,position""",([str(row["id"]) for row in rows],))
+            grouped={str(row["id"]):[] for row in rows}
+            for step in cursor.fetchall():
+                grouped[str(step["workflow_id"])].append(step)
+            return [serialize(cursor,row,loaded_steps=grouped[str(row["id"])]) for row in rows]
 
 
 def insert_workflow(cursor, body, user, key, *, payload=None):

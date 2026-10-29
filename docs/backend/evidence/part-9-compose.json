@@ -1,0 +1,21 @@
+{
+  "scope": "isolated backend Compose project with synthetic data",
+  "checks": {
+    "compose_startup_and_health": true,
+    "non_root_and_scoped_image": true,
+    "database_and_private_document_persistence": true,
+    "outage_readiness_503_liveness_200": true,
+    "database_restart_recovery": true,
+    "migration_replay_is_noop": true
+  },
+  "compose_version": "5.4.0",
+  "runtime_versions": {
+    "python": "3.12.16",
+    "fastapi": "0.162.0",
+    "uvicorn": "0.54.0",
+    "postgresql": "16.15"
+  },
+  "applied_migrations": 8,
+  "passes": true,
+  "cleanup": true
+}

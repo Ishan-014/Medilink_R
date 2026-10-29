@@ -1,0 +1,15 @@
+# Only backend source is required for this backend-only image.
+**
+!backend/
+!backend/**
+backend/agents/
+backend/mcp/
+backend/data/
+backend/venv/
+backend/.venv/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+backend/**/.env
+backend/**/.env.*
+backend/config/mcp.local.json
