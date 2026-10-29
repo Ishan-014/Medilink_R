@@ -1,4 +1,4 @@
-# Backend integration contracts (Part 9)
+# Backend integration contracts (Part 10)
 
 Implemented: health, patient auth, current identity, admin provisioning, workflow
 creation/list/detail/plan/transitions/cancellation, and persistent document APIs.
@@ -15,6 +15,13 @@ traces, consistent backend error codes and authoritative receipt reconciliation.
 performance; [acceptance coverage](part-9-acceptance.md) tracks pending team integration. Existing
 unprefixed routes retain their response formats.
 Ownership and current roles are always resolved server-side.
+
+The final [delivery portal](README.md), [OpenAPI snapshot](openapi.json) and live
+`/docs` / `/openapi.json` describe the cumulative backend. Regenerate/check the
+snapshot with `python -m backend.ops.export_contract` / `--check` after API changes.
+[Configuration](configuration.md), [database setup](database.md),
+[architecture](architecture.md) and [the rehearsal guide](demonstration.md) form
+the backend handoff. Earlier part documents are historical stage-specific notes.
 
 ## Response format
 
@@ -136,13 +143,15 @@ Part 4 integration errors add `MCP_NOT_CONFIGURED`, `MCP_CONFIG_INVALID`,
 `MCP_INPUT_INVALID`, `MCP_OUTPUT_INVALID`, `MCP_REMOTE_ERROR`, and
 `MCP_WRITE_BLOCKED`. Raw remote exceptions and credentials are never returned.
 Tool calls require the matching ordered plan step in an executing workflow. All
-writes remain blocked until the Part 7 gate exists. The unchanged agent's direct
-function calls are not routed through this new boundary by Part 4.
+writes require the current authoritative Part 7 gate. Only canonical managed
+patient creation and claim submission writes are enabled. The unchanged agent
+still needs to integrate through this protected boundary; legacy direct clinical
+write functions refuse mutation.
 
 Part 5 managed workflows add `managed_kind` and `subject_user_id` to workflow
 responses. Generic plan/status mutations cannot bypass the managed domain service.
-Actual creation/submission remains blocked pending Part 7; prepared claims are
-not submitted claims. See the Part 5 contract table for required business facts
+Creation/submission now uses Part 7's scope-bound, single-use approval and
+validated receipt flow; a prepared claim is still not a submitted claim. See the Part 5 contract table for required business facts
 in EHR, billing and insurance responses.
 
 Part 6 adds `use_graph: true` to new managed claims. Such claims require current

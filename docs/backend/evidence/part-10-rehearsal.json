@@ -1,0 +1,38 @@
+{
+  "scope": "synthetic backend handoff rehearsal; not a cross-team end-to-end demonstration",
+  "counts": {
+    "tests": 18,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "scenarios": {
+    "AT-01": "test_business_workflows.py::test_onboarding_requires_confirmed_ehr_success_and_persists",
+    "AT-02": "test_documents.py::test_extraction_lifecycle_is_persistent_and_validated",
+    "AT-03": "test_mcp_client_protocol.py::test_real_stdio_handshake_discovery_and_two_capabilities",
+    "AT-04": "test_graph.py::test_graph_dependent_claim_requires_all_three_queries",
+    "AT-05": "test_integrations.py::test_two_capabilities_are_validated_and_traced",
+    "AT-06": "test_approvals.py::test_claim_requires_administrator_even_if_medium_is_automatic",
+    "AT-07": "test_approvals.py::test_review_execute_and_receipt_are_persisted_once",
+    "AT-08": "test_approvals.py::test_rejection_is_terminal_and_never_calls_write",
+    "AT-09": "test_business_workflows.py::test_timeout_never_confirms_a_patient_and_cannot_auto_retry",
+    "AT-10": "test_audit_recovery.py::test_successful_receipt_reconciles_without_replaying_write",
+    "AT-11": "test_audit_recovery.py::test_trace_includes_history_failures_approval_and_recovery",
+    "AT-12": "test_approvals.py::test_only_independent_authorized_reviewer_can_approve"
+  },
+  "covered_acceptance_ids": [
+    "AT-01",
+    "AT-02",
+    "AT-03",
+    "AT-04",
+    "AT-05",
+    "AT-06",
+    "AT-07",
+    "AT-08",
+    "AT-09",
+    "AT-10",
+    "AT-11",
+    "AT-12"
+  ],
+  "passes": true
+}

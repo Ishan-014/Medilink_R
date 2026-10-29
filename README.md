@@ -1,4 +1,35 @@
-﻿# MediLink
+# MediLink
+
+## Backend delivery: parts 1–10
+
+The cumulative backend delivery is documented in **[docs/backend/README.md](docs/backend/README.md)**.
+It provides patient/staff authentication and roles, versioned workflows, private
+documents, managed onboarding/claims, hospital/graph adapter boundaries,
+independent approvals, audit traces and receipt-based recovery.
+
+From a fresh checkout of `backend-part-10`, with Python 3.12+ and Docker running:
+
+```bash
+python -m backend.ops.init_env
+docker compose -f compose.backend.yaml up --build --detach --wait
+```
+
+This creates a NEW private environment and starts the backend-only API plus
+PostgreSQL and migrations. Existing `.env` files are left unchanged. Use
+`http://127.0.0.1:8000/docs` for the live API. No demo accounts are auto-created;
+patient registration and trusted staff provisioning are described in the guide.
+The minimal image requires a separate biometric runtime/enrollment for staff face
+login. It does not run the legacy AI/dashboard entry point below.
+
+See [API contracts](docs/backend/api-contracts.md),
+[configuration](docs/backend/configuration.md),
+[architecture](docs/backend/architecture.md), and
+[the backend demonstration](docs/backend/demonstration.md).
+[Acceptance coverage](docs/backend/part-9-acceptance.md) tracks the remaining
+frontend/agent/MCP/graph integration; the backend branch is not a whole-project
+release tag. The legacy instructions below remain a reference for those owners.
+
+## Legacy prototype reference
 
 MediLink is a role-based healthcare operations and AI assistant prototype built for a hospital workflow demo. The project combines a React frontend, a FastAPI backend, PostgreSQL-backed EHR data, and an OpenAI + LangGraph-powered clinical assistant. The goal is to simulate a realistic clinic environment where doctors and receptionists can review patient records and ask context-aware questions through an AI interface.
 
@@ -10,7 +41,7 @@ MediLink includes:
 - a three-step staff authentication flow: credentials → ID card QR → facial recognition
 - doctor and receptionist role-based dashboards
 - patient search, listing, and detail views
-- encrypted JWT-based session management
+- signed JWT-based session management
 - AI-powered patient queries using OpenAI, LangGraph, and MCP-style tool execution
 - document-aware chat with PDF/TXT upload support
 - PostgreSQL-backed patient records and role-specific access control
@@ -170,9 +201,10 @@ Receptionists can access administrative information such as:
 
 ---
 
-## Demo accounts
+## Legacy demo account examples
 
-The app seeds demo users for local testing.
+These historical examples are not auto-provisioned by the delivered backend. Use
+[trusted account provisioning](docs/backend/database.md#first-accounts) for its current setup.
 
 ### Doctor
 - Email: doctor@medilink.demo
@@ -228,7 +260,7 @@ OPENAI_MODEL=gpt-5-mini
 
 ---
 
-## Backend setup
+## Legacy backend setup
 
 From the project root:
 
